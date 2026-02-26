@@ -53,6 +53,16 @@ export default function MainLayout() {
                 >
                   Profile
                 </Link>
+                 <Link
+                  to="/LLMTest"
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    isActive('/LLMTest')
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  LLMTest
+                </Link>
               </nav>
             </div>
 
