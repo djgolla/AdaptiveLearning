@@ -18,6 +18,7 @@
 #Probability: ex 'A bag contains 5 red marbles, 3 blue marbles, and 2 green marbles. If a marble is drawn at random, what is the probability of drawing a red marble?' The question should include the probability scenario to be analyzed, and the expected operation type should also be included. Variables should be in the format '5 red marbles' for a variable, and operations should be defined using '+', '-', '*', '/' to indicate the operations. For example, a question with variables 'red marbles', '5', 'blue marbles', '3', 'green marbles', '2', 'total marbles', '+', 'probability of red marble', '/', 'total marbles', will be seen as probability of red marble = red marbles / total marbles, and the operations will be performed left to right, so it will be probability of red marble = 5 / (5 + 3 + 2) = 5/10 = 1/2.
 
 import os
+import random
 from supabase import create_client, Client #pip install supabase
 from dotenv import load_dotenv   #pip install dotenv
 from ollama import chat, generate
@@ -33,11 +34,6 @@ from sympy.parsing.sympy_parser import (
     implicit_multiplication_application
 ) #treat 2x as 2*x for sympy parsing
 
-#there are probably libraries i can look into to solve questions, 
-#sympy 
-
-
-
 def to_native(value): 
     if isinstance(value, Integer): 
         return int(value) 
@@ -45,6 +41,7 @@ def to_native(value):
 
 #algebra solver works, but questions are very similar.
 #POSSIBLY - can have separate prompts for each topic type. Randomize which gets selected. 
+#ISSUE: saw a case where correct answer was not in answer options. 
 general_prompt = "You are being asked to provide a Math question suitable for 6th-8th grade students. The response should be in JSON format. The Question Text, Question Topic, and any Variables will be displayed." \
 "Here are the potential topic types: Ordering, Rationals, Operations, Expressions, Algebra, Geometry, Angle relationships, Mean, Median, Mode, Probability. Below is some guidance for the response formatting depending on the question topic." \
 "Topics: Ordering (e.g order numbers (including negatives and two digit decimal values) from least to greatest or vice versa). For least to greatest the question topic should be 'ordering-least', otherwise it is 'ordering-greatest'. " \
@@ -58,13 +55,44 @@ general_prompt = "You are being asked to provide a Math question suitable for 6t
 "Median: Provide a short to medium sized integer or decimal variable dataset." \
 "Mode: Provide a short to medium sized integer or decimal variable dataset." \
 "Probability: ex 'A bag contains 5 red marbles, 3 blue marbles, and 2 green marbles. If a marble is drawn at random, what is the probability of drawing a red marble?' The question should include the probability scenario to be analyzed, and the expected operation type should also be included. Variables should be in the format '5 red marbles' for a variable, and operations should be defined using '+', '-', '*', '/' to indicate the operations. For example, a question with variables 'red marbles', '5', 'blue marbles', '3', 'green marbles', '2', 'total marbles', '+', 'probability of red marble', '/', 'total marbles', will be seen as probability of red marble = red marbles / total marbles, and the operations will be performed left to right, so it will be probability of red marble = 5 / (5 + 3 + 2) = 5/10 = 1/2." \
-"The response should be solely in JSON format without any additional text, characters, or symbols before and after {}. The JSON should include the following keys: 'question_text', 'question_topic', and 'variables'. The value for 'question_text' should be a string of the question being asked. The value for 'question_topic' should be a string of the question topic, which should be one of the previously defined topic types. The value for 'variables' should be a list of the variables included in the question, with each variable formatted as previously defined for each topic type. For example, if the question is 'Solve for x: 2x + 3 = 7.' then the response should strictly be in the format: { 'question_text': 'Solve for x: 2x + 3 = 7.', 'question_topic': 'algebra', 'variables': ['2x', '+', '3', '=', '7'] }. If a variable is in use like '2x', 'x' should always be the unknown value. To be JSON complian double quotes should be used instead." \
+"The response should be solely in JSON format without any additional text, characters, or symbols before and after {}. The JSON should include the following keys: 'question_text', 'question_topic', and 'variables'. The value for 'question_text' should be a string of the question being asked. The value for 'question_topic' should be a string of the question topic, which should be one of the previously defined topic types. The value for 'variables' should be a list of the variables included in the question, with each variable formatted as previously defined for each topic type. For example, if the question is 'Solve for x: 2x + 3 = 7.' then the response should strictly be in the format: { 'question_text': 'Solve for x: 2x + 3 = 7.', 'question_topic': 'algebra', 'variables': ['2x', '+', '3', '=', '7'] }. If a variable is in use like '2x', 'x' should always be the unknown value. To be JSON compliant double quotes should be used instead." \
 "FOR TESTING PURPOSES, PLEASE GENERATE A QUESTION ON THE TOPIC OF Algebra."
 
+
+algebra_prompt = f"""
+You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
+The Question Text, Question Topic, and Variables will be displayed. The Question Topic will be "algebra".
+
+Algebra example: "Solve for x: 2x + 3 = 7." 
+The question should include the equation to be solved. Variables must be formatted as strings such as "x", and operations must be 
+represented using the symbols "+", "-", "*", "/". For example, the variables list ["2x", "+", "3", "=", "7"] represents the equation 2x + 3 = 7.
+
+There may be up to three operations on the left-hand side, and up to two terms may contain the variable "x". 
+Use a variety of integer values as long as the equation has a valid solution.
+
+Return ONLY valid JSON with no text before or after the JSON object.
+
+The JSON must follow this exact structure:
+
+{{
+  "question_text": "Solve for x: 2x + 3 = 7.",
+  "question_topic": "algebra",
+  "variables": ["2x", "+", "3", "=", "7"]
+}}
+
+Rules:
+- Use ONLY double quotes for all strings.
+- The JSON object must contain the keys "question_text", "question_topic", and "variables".
+- "variables" must be a list of strings.
+- Do NOT include any characters outside the JSON object.
+"""
+
 response = generate(model="llama3.1:8b", 
-                        prompt=general_prompt,
-                        options = {"temperature": 0.7,
-                                    "top_p": 100} #increase randomness, 
+                        prompt=algebra_prompt,
+                        options = {"temperature": 0.9,
+                                    "top_p": 0.9,
+                                    "top_k": 75} #increase randomness, 
+
                         )
 
 
@@ -94,23 +122,79 @@ if question_data['question_topic'] == 'algebra':
     solution = solve(equation, x) #solve for x
     print("Solution:", solution)
 
-if (solution != []):
-    solution_prompt = f"The solution to the question is {solution}. Please generate 4 unique answer options, including the correct answer, in a JSON format. The JSON should include the following keys: 'question_text', 'answer_options', and 'correct_answer'. The response should solely be in JSON format without any additional text, characters, or symbols before and after. The JSON should be a list of answer options, with the correct answer included as one of the options. For example, if the solution is 2, then a valid response could be [\"10\", \"2\", \"7\", \"3\"]. These answer options shouldonly include numbers, with no additional characters within a singular answer. Please randomize the order of the answer options."
+solution = str(solution[0]) if solution else None
+
+#ISSUES - correct answer still not being included. Format is often incorrect
+solution_prompt = f"""
+        You must generate four answer options for a math question.
+
+        THE CORRECT ANSWER MUST APPEAR EXACTLY AS: {solution}
+        Do not simplify, modify, or reformat the correct answer.
+
+        Return ONLY valid JSON in this structure. the answer_options values should be filled with four numerical values, one of which being {solution}:
+
+        {{
+        "answer_options": ["x", "x", "x", "x"],
+        "correct_answer": "{solution}"
+        }}
+
+        Rules:
+        - answer_options must contain exactly 4 unique values.
+        - One of the values MUST be the exact correct answer: {solution}
+        - The other 3 values must be plausible incorrect answers.
+        - Do NOT include any text outside the JSON.
+        - Do NOT include question_text.
+        - All values must be numbers or strings representing numbers.
+        - Randomize the order of answer_options.
+        """
+
+#SOLUTION TEST 2: provide question and solution, ask for three generated incorrect answers then combine with solution.
+incorrect_solution_prompt = f"""
+    Generate three incorrect numerical answer options for a math problem.
+    Question:
+    {question_data["question_text"]}
+    Correct Answer:
+    {solution}
+
+    Rules:
+    - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
+    - The answers must NOT equal or simplify to {solution}
+    - Unique numbers only 
+    - Only numbers or simple numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
+    - No fractions or expressions
+    - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
+    {{
+    "incorrect_answers": ["x","x","x"]
+    }}
+    """
+
+
+#print(solution)
+if (solution != None):
     answer_response = generate(model="llama3.1:8b",
-                            prompt=solution_prompt,
-                            options = {"temperature": 0.7,
-                                        "top_p": 100} #increase randomness, 
+                            prompt=incorrect_solution_prompt,
+                            options = {"temperature": 0.4,
+                                        "top_p": 0.9,
+                                        "top_k": 40} #slightly less randomness, 
                 )
-print(answer_response.response)
+    #print(answer_response.response)
+
+
+#combining generated incorrect responses with correct solution. 
+incorrect_data = json.loads(answer_response.response)
+
+answers = incorrect_data["incorrect_answers"] + [str(solution)]
+random.shuffle(answers)
 
 
 #make new JSON w/ question_text, answer options, and correct answer.
 question_json = {
     "question_text": question_data["question_text"],
-    "answer_options": [to_native(opt) for opt in json.loads(answer_response.response)["answer_options"]], #convert answer options to native Python types (e.g. int instead of sympy Integer) for JSON serialization
-    "correct_answer": int(solution[0]) if solution else None #requires type cast for JSON serialization, and also accounts for potential empty solution list if question is unsolvable or solution is not a number.
+    #"answer_options": [to_native(opt) for opt in json.loads(answer_response.response)["answer_options"]], #convert answer options to native Python types (e.g. int instead of sympy Integer) for JSON serialization
+    "answer_options":  [to_native(opt) for opt in answers], 
+    "correct_answer": solution #requires type cast for JSON serialization, and also accounts for potential empty solution list if question is unsolvable or solution is not a number.
 }
-#print(answer_response.response)
+print(question_json)
 
 
 #trying to now display on flask

@@ -4,9 +4,15 @@ import { useAuth } from '../../context/AuthContext'
 //no supabase - just direct contact w/ test3 to see how question generation is working. 
 export default function LLMTest2() {
     const { user } = useAuth()
-    const[data, setData] = useState([])
+    const[data, setData] = useState(null)
     const [showGenerateQuestionButton, setShowGenerateQuestionButton] = useState(true)
+    const [activeButton, setActiveButton] = useState(null)
+    const [selectedAnswer, setSelectedAnswer] = useState(null)
 
+    const [submitted, setSubmitted] = useState(false)
+    const [correct, setCorrect] = useState(false)
+
+    //Need to make so question generated when button pressed. Right now only one question generated each time backend run. 
     useEffect(() => { //obtain question/answer options from backend. 
         if (!showGenerateQuestionButton) 
         fetch('http://localhost:5000/')
@@ -15,6 +21,20 @@ export default function LLMTest2() {
         .catch(error => console.error('Error fetching data:', error));
     }, [showGenerateQuestionButton]); //re-run whenever button is clicked to generate new question.
 
+    const handleAnswerSelect = (index) => {
+        setSelectedAnswer(index)
+        setActiveButton(index)
+    }
+
+    const handleSubmit = () => {
+        setSubmitted(true)
+        
+        if (data.answer_options[selectedAnswer] === data.correct_answer) {
+        setCorrect(true)
+        } else {
+            setCorrect(false)
+        }
+    }
 
     return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -22,17 +42,60 @@ export default function LLMTest2() {
        
         <div className="bg-white rounded-lg shadow-md p-6 max-w-md">
         {showGenerateQuestionButton && (
-          <button onClick = {() => setShowGenerateQuestionButton(false)}
+          <button onClick = {() => setShowGenerateQuestionButton(false) && setSubmitted(false)}
           className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">
           Generate Question </button>
         )}
-        {!showGenerateQuestionButton && (
+        {!showGenerateQuestionButton && data && ( 
             <div className="mt-4">
                 <h2 className="text-lg font-semibold mb-2">Generated Question:</h2>
-                <p className="text-gray-700">{JSON.stringify(data, null, 2)}</p>
+                <div className="bg-gray-100 p-4 rounded-lg mb-4">
+                    <p className="text-gray-800">{data.question_text}</p>
+                </div>
+                
+                {/*Answer options. Style should change for whechever button is selected. */}
+                <div>
+                {data.answer_options.map((option, index) => (
+                    <button
+                    key={index}
+                    onClick={() => handleAnswerSelect(index)}
+                    style={{
+                        backgroundColor: activeButton === index ? "green" : "gray",
+                        color: "white",
+                        padding: "10px 20px",
+                        width: "100%",
+                        border: "none",
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        marginBottom: "10px"
+                    }}
+                    >
+                    {option}
+                    </button>
+                ))}
+                </div>
+
+                <div>
+                <button type="submit" onClick={handleSubmit} className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">
+                    Submit
+                </button>
+                </div>
             </div>
         )}
         </div>
+        
+        {submitted && correct && (
+            <div>
+                <p>Correct!</p>
+            </div>
+        )}
+        {submitted && !correct && (
+            <div>
+                <p>Incorrect.</p>
+            </div>
+        )}
+    
+    
 
     </main>
 )
