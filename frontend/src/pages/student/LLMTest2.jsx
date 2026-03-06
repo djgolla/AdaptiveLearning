@@ -26,6 +26,16 @@ export default function LLMTest2() {
         setActiveButton(index)
     }
 
+    const resetForNextQuestion = () => {
+        setSubmitted(false);
+        setCorrect(false);
+        setActiveButton(null);
+        setSelectedAnswer(null);
+        setData(null);
+
+        setShowGenerateQuestionButton(false); // triggers fetch
+        };
+
     const handleSubmit = () => {
         setSubmitted(true)
         
@@ -42,7 +52,7 @@ export default function LLMTest2() {
        
         <div className="bg-white rounded-lg shadow-md p-6 max-w-md">
         {showGenerateQuestionButton && (
-          <button onClick = {() => setShowGenerateQuestionButton(false) && setSubmitted(false)}
+          <button onClick = {resetForNextQuestion}
           className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">
           Generate Question </button>
         )}
@@ -95,7 +105,14 @@ export default function LLMTest2() {
             </div>
         )}
     
-    
+        {submitted && (
+            <div>
+            <button 
+            onClick = {()=> {setShowGenerateQuestionButton(true); setSubmitted(false);}}
+            className="w-600 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-200">
+            Next Question! </button>
+            </div>
+        )}
 
     </main>
 )

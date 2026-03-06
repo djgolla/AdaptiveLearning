@@ -34,6 +34,9 @@ from sympy.parsing.sympy_parser import (
     implicit_multiplication_application
 ) #treat 2x as 2*x for sympy parsing
 
+# Enable implicit multiplication (2x → 2*x)
+transformations = (standard_transformations + (implicit_multiplication_application,))
+
 def to_native(value): 
     if isinstance(value, Integer): 
         return int(value) 
@@ -87,69 +90,34 @@ Rules:
 - Do NOT include any characters outside the JSON object.
 """
 
-response = generate(model="llama3.1:8b", 
+solution = -1
+
+
+#Potential improvements:
+#Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
+#If solution is a fraction, at least one other generated response should be a fraction. 
+def generate_algebra_question():
+    response = generate(model="llama3.1:8b", 
                         prompt=algebra_prompt,
                         options = {"temperature": 0.9,
                                     "top_p": 0.9,
                                     "top_k": 75} #increase randomness, 
-
                         )
-
-
-print(response.response)
-
-# Enable implicit multiplication (2x → 2*x)
-transformations = (standard_transformations + (implicit_multiplication_application,))
-
-if (response.response.startswith("{") and response.response.endswith("}")):
-    question_data = json.loads(response.response)
-    # print("Question Text:", question_data['question_text'])
-    # print("Question Topic:", question_data['question_topic'])
-    # print("Variables:", question_data['variables'])
-
-
-#Algebra solver - can turn into function later
-if question_data['question_topic'] == 'algebra':
+    if (response.response.startswith("{") and response.response.endswith("}")):
+        question_data = json.loads(response.response)
+    
     parts = question_data['variables']
     equation_stra = "".join(parts) #turn individual variables/operations into a single string to be parsed by sympy
     x = symbols('x') #define variable for sympy
     left, right = equation_stra.split('=') #split equation into left and right parts
-
     left_expr = parse_expr(left, transformations=transformations)
     right_expr = parse_expr(right, transformations=transformations)
-
     equation = Eq(left_expr, right_expr) 
     solution = solve(equation, x) #solve for x
-    print("Solution:", solution)
+    #print("Solution:", solution)
+    solution = str(solution[0]) if solution else None
 
-solution = str(solution[0]) if solution else None
-
-#ISSUES - correct answer still not being included. Format is often incorrect
-solution_prompt = f"""
-        You must generate four answer options for a math question.
-
-        THE CORRECT ANSWER MUST APPEAR EXACTLY AS: {solution}
-        Do not simplify, modify, or reformat the correct answer.
-
-        Return ONLY valid JSON in this structure. the answer_options values should be filled with four numerical values, one of which being {solution}:
-
-        {{
-        "answer_options": ["x", "x", "x", "x"],
-        "correct_answer": "{solution}"
-        }}
-
-        Rules:
-        - answer_options must contain exactly 4 unique values.
-        - One of the values MUST be the exact correct answer: {solution}
-        - The other 3 values must be plausible incorrect answers.
-        - Do NOT include any text outside the JSON.
-        - Do NOT include question_text.
-        - All values must be numbers or strings representing numbers.
-        - Randomize the order of answer_options.
-        """
-
-#SOLUTION TEST 2: provide question and solution, ask for three generated incorrect answers then combine with solution.
-incorrect_solution_prompt = f"""
+    incorrect_solution_prompt = f"""
     Generate three incorrect numerical answer options for a math problem.
     Question:
     {question_data["question_text"]}
@@ -168,33 +136,25 @@ incorrect_solution_prompt = f"""
     }}
     """
 
+    if (solution != None):
+        answer_response = generate(model="llama3.1:8b",
+                                prompt=incorrect_solution_prompt,
+                                options = {"temperature": 0.4,
+                                            "top_p": 0.9,
+                                            "top_k": 40}) #slightly less randomness, 
 
-#print(solution)
-if (solution != None):
-    answer_response = generate(model="llama3.1:8b",
-                            prompt=incorrect_solution_prompt,
-                            options = {"temperature": 0.4,
-                                        "top_p": 0.9,
-                                        "top_k": 40} #slightly less randomness, 
-                )
-    #print(answer_response.response)
+    #combining generated incorrect responses with correct solution. 
+    incorrect_data = json.loads(answer_response.response)
 
+    answers = incorrect_data["incorrect_answers"] + [str(solution)]
+    random.shuffle(answers)
 
-#combining generated incorrect responses with correct solution. 
-incorrect_data = json.loads(answer_response.response)
-
-answers = incorrect_data["incorrect_answers"] + [str(solution)]
-random.shuffle(answers)
-
-
-#make new JSON w/ question_text, answer options, and correct answer.
-question_json = {
-    "question_text": question_data["question_text"],
-    #"answer_options": [to_native(opt) for opt in json.loads(answer_response.response)["answer_options"]], #convert answer options to native Python types (e.g. int instead of sympy Integer) for JSON serialization
-    "answer_options":  [to_native(opt) for opt in answers], 
-    "correct_answer": solution #requires type cast for JSON serialization, and also accounts for potential empty solution list if question is unsolvable or solution is not a number.
-}
-print(question_json)
+    #Build final JSON
+    return {
+        "question_text": question_data["question_text"],
+        "answer_options": answers,
+        "correct_answer": solution
+    }
 
 
 #trying to now display on flask
@@ -202,5 +162,30 @@ app= Flask(__name__)
 CORS(app)
 @app.route("/")
 def display_question():
-    return jsonify(question_json)
+    return jsonify(generate_algebra_question())
 
+
+
+#ISSUES - correct answer still not being included. Format is often incorrect
+# solution_prompt = f"""
+#         You must generate four answer options for a math question.
+
+#         THE CORRECT ANSWER MUST APPEAR EXACTLY AS: {solution}
+#         Do not simplify, modify, or reformat the correct answer.
+
+#         Return ONLY valid JSON in this structure. the answer_options values should be filled with four numerical values, one of which being {solution}:
+
+#         {{
+#         "answer_options": ["x", "x", "x", "x"],
+#         "correct_answer": "{solution}"
+#         }}
+
+#         Rules:
+#         - answer_options must contain exactly 4 unique values.
+#         - One of the values MUST be the exact correct answer: {solution}
+#         - The other 3 values must be plausible incorrect answers.
+#         - Do NOT include any text outside the JSON.
+#         - Do NOT include question_text.
+#         - All values must be numbers or strings representing numbers.
+#         - Randomize the order of answer_options.
+#         """
