@@ -70,20 +70,29 @@ def solve_ordering(values, direction="least_to_greatest"):
 
 
 
-def generate_ordering_question(max_retries=3):
+def generate_ordering_question(global_questions, prev_questions, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = ordering_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
         else:
             prompt = ordering_prompt
 
+
+        prompt += (
+            "\nPreviously generated questions:\n"
+            + "\n".join(q["text"] for q in prev_questions)
+            + "\n\nRecent global questions:\n"
+            + "\n".join(q["text"] for q in global_questions)
+            + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
+        )
+            
         response = generate(
             model="llama3.1:8b",
             prompt=prompt,
             options={
-                "temperature": 0.9,
-                "top_p": 0.9,
-                "top_k": 75
+                "temperature": 1.1, #more creativity
+                "top_p": 0.95, #more diversity
+                "top_k": 100 #broader token sampling.
             }
         )
 

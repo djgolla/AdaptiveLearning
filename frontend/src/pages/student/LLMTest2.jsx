@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 export default function LLMTest2() {
     const { user } = useAuth()
     const[data, setData] = useState(null)
+    const [error, setError] = useState(false)
     const [showGenerateQuestionButton, setShowGenerateQuestionButton] = useState(true)
     const [activeButton, setActiveButton] = useState(null)
     const [selectedAnswer, setSelectedAnswer] = useState(null)
@@ -12,13 +13,22 @@ export default function LLMTest2() {
     const [submitted, setSubmitted] = useState(false)
     const [correct, setCorrect] = useState(false)
 
-    //Need to make so question generated when button pressed. Right now only one question generated each time backend run. 
     useEffect(() => { //obtain question/answer options from backend. 
         if (!showGenerateQuestionButton) 
         fetch('http://localhost:5000/')
         .then(response => response.json())
-        .then(data => setData(data))
-        .catch(error => console.error('Error fetching data:', error));
+        .then(data => {
+            if (!data || !data.question_text) {
+                throw new Error("Invalid response")
+            }
+            setData(data)
+        })
+        .catch(error => {
+            console.error('Error fetching data:', error);
+            //alert("Failed to load question. Try again.");
+            setError(true);
+            setShowGenerateQuestionButton(true); // allow user to try again
+        });
     }, [showGenerateQuestionButton]); //re-run whenever button is clicked to generate new question.
 
     const handleAnswerSelect = (index) => {
@@ -27,6 +37,7 @@ export default function LLMTest2() {
     }
 
     const resetForNextQuestion = () => {
+        setError(false);
         setSubmitted(false);
         setCorrect(false);
         setActiveButton(null);
@@ -102,6 +113,12 @@ export default function LLMTest2() {
         {submitted && !correct && (
             <div>
                 <p>Incorrect.</p>
+            </div>
+        )}
+
+        {error && (
+            <div className="mt-4 text-red-600">
+                <p>Question generation failed. Please try again!</p>
             </div>
         )}
     

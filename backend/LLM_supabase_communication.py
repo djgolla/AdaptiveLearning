@@ -66,7 +66,8 @@ def generate_question():
         highest_stress = "None"
 
 
-    #Works ok, gives incorrect answers fairly often though. 
+    #Works ok, gives incorrect answers fairly often though.
+    
     prompt = f""" 
     Generate a math question for a 6-8th grade student. These students have special education needs and may be sensitive to stress. 
     Your goal is to provide a solvable math question that will be engaging without resulting in increased stress levels.
