@@ -400,6 +400,12 @@ def generate_geometry_question(global_questions, prev_questions, max_retries=3):
             prompt = geometry_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
         else:
             prompt = geometry_prompt
+
+        #randomize scenario selection to ensure variety in generated questions.
+        scenario = random.randint(1,18)
+
+        prompt += f"\nYOU must generate a question for scenario {scenario}."
+        print(scenario)
         
         prompt += (
             "\nPreviously generated questions:\n"
@@ -561,6 +567,7 @@ def generate_geometry_question(global_questions, prev_questions, max_retries=3):
     #Build final JSON
     return {
         "question_text": question_data["question_text"],
+        "question_topic": question_data["question_topic"],
         "answer_options": answers,
         "correct_answer": solution
     }

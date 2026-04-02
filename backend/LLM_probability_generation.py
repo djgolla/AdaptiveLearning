@@ -19,8 +19,20 @@ from sympy import symbols, Eq, solve, sympify, Integer, Rational
 
 #current probability scenarions: probability_of, not_probability_of, dice, 
 def extract_json(text):
-    match = re.search(r"\{.*?\}", text, re.DOTALL)
-    return match.group() if match else None
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i+1]
+
+    return None
 
 def solve_probability(scenario, items, target):
     if (scenario == "probability_of"):
@@ -36,13 +48,23 @@ def solve_probability(scenario, items, target):
 #need to check if these are right
 def solve_probability_of(items, target):
     total = sum(items.values())
-    target = total - items.get(target)
-    return Rational(target, total)
+    
+    if isinstance(target, list):
+        favorable = sum(items.get(t, 0) for t in target)
+    else:
+        favorable = items.get(target, 0)
+
+    return Rational(favorable, total)
 
 def solve_not_probability_of(items, target):
     total = sum(items.values())
-    not_target = total - items.get(target, 0)
-    return Rational(not_target, target)
+
+    if isinstance(target, list):
+        excluded = sum(items.get(t, 0) for t in target)
+    else:
+        excluded = items.get(target, 0)
+
+    return Rational(total - excluded, total)
 
 def solve_dice(sides, target):
     return Rational(len(target), sides)
@@ -115,12 +137,22 @@ solution = -1
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
 #If solution is a fraction, at least one other generated response should be a fraction. 
+
+#LLM seems to have poor randomization of scenarios, for now selecting randomized scenario for it.
 def generate_probability_question(global_questions, prev_questions, max_retries=3):
+
+
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = prob_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
         else:
             prompt = prob_prompt
+
+        #randomize scenario selection to ensure variety in generated questions.
+        scenario = random.randint(1,3)
+
+        prompt += f"\nYOU must generate a question for scenario {scenario}."
+        print(scenario)
 
         prompt += (
             "\nPreviously generated questions:\n"
@@ -140,6 +172,7 @@ def generate_probability_question(global_questions, prev_questions, max_retries=
             }
         )
 
+        #print("RAW RESPONSE", response.response)
         raw = extract_json(response.response)
 
         if not raw:
@@ -168,9 +201,20 @@ def generate_probability_question(global_questions, prev_questions, max_retries=
         raise ValueError("Failed to generate valid JSON after retries")
     
     scenario = question_data["scenario"]
-    items = question_data["sides"] if scenario == "dice" else question_data["items"]
     target = question_data["target"]
+
+    if scenario == "dice":
+        sides = sympify(question_data["sides"])
+        target = [sympify(t) for t in target]
+        items = sides  
+
+    else:
+        items = {k: sympify(v) for k, v in question_data["items"].items()}
     
+    if not items or not target:
+        raise ValueError("Invalid items or target in question data")
+
+
     solution = solve_probability(scenario, items, target)
 
     solution = str(solution) if solution else None
@@ -205,6 +249,8 @@ def generate_probability_question(global_questions, prev_questions, max_retries=
                                     options = {"temperature": 0.4,
                                                 "top_p": 0.9,
                                                 "top_k": 40}) #slightly less randomness, 
+        #print("RAW ANSWER", answer_response.response)
+        
         raw = extract_json(answer_response.response)
 
         if not raw:
@@ -241,6 +287,7 @@ def generate_probability_question(global_questions, prev_questions, max_retries=
     #Build final JSON
     return {
         "question_text": question_data["question_text"],
+        "question_topic": question_data["question_topic"],
         "answer_options": answers,
         "correct_answer": solution
     }

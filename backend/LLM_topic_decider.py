@@ -26,6 +26,8 @@ history = {
 
 #select from 11 math topics
 #POSSIBLY can have LLM select topic first given things like stress/accuracy
+
+#TO-DO: Implement LLM-based topic selection, provide (optional) accuracy/stress values from frontend. 
 def randomize_question():
     num = random.randint(0, 9) #get int from 0-9 inclusive
     print("num", num)

@@ -4,6 +4,26 @@ import { useAuth } from '../../context/AuthContext'
 //no supabase - just direct contact w/ test3 to see how question generation is working. 
 export default function LLMTest2() {
     const { user } = useAuth()
+    
+    const [stats, setStats] = useState({
+        total: {correct: 0, attempts: 0},
+        subjects: {
+            ordering: {correct: 0, attempts: 0},
+            rationals: {correct: 0, attempts: 0},
+            expressions: {correct: 0, attempts: 0},
+            algebra: {correct: 0, attempts: 0},
+            geometry: {correct: 0, attempts: 0},
+            angle_relationships: {correct: 0, attempts: 0},
+            mean: {correct: 0, attempts: 0},
+            median: {correct: 0, attempts: 0},
+            mode: {correct: 0, attempts: 0},
+            probability: {correct: 0, attempts: 0},
+        }
+    });
+    
+    
+    
+    
     const[data, setData] = useState(null)
     const [error, setError] = useState(false)
     const [showGenerateQuestionButton, setShowGenerateQuestionButton] = useState(true)
@@ -55,7 +75,45 @@ export default function LLMTest2() {
         } else {
             setCorrect(false)
         }
+
+        updateStats(correct)
     }
+
+    //NEED to go back and ensure question_topic is in JSON
+    const updateStats = (correct) => {
+        setStats(prevStats => {
+            const newStats = {...prevStats};
+            const topic = data.question_topic
+
+            newStats.total.attempts += 1
+            newStats.subjects[topic].attempts += 1
+
+            if (correct) {
+                newStats.total.correct += 1
+                newStats.subjects[topic].correct += 1
+            }
+
+            return newStats
+    });
+    };
+
+    //Save stats to local storage so they persist across refreshes.
+    //Should modify later to ensure saved to user
+    useEffect(() => {
+        const saved = localStorage.getItem("stats");
+        if (saved) setStats(JSON.parse(saved));
+    }, [])
+
+    useEffect(() => {
+        localStorage.setItem("stats", JSON.stringify(stats));
+    }, [stats])
+
+
+    const getAccuracy = (topic) => {
+        const subjectStats = stats.subjects[topic]
+        if (subjectStats.attempts === 0) return 0
+        return (subjectStats.correct / subjectStats.attempts) * 100
+    };
 
     return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

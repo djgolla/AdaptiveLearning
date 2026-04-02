@@ -22,8 +22,20 @@ def to_native(value):
         return int(value) 
     return value
 def extract_json(text):
-    match = re.search(r"\{.*?\}", text, re.DOTALL)
-    return match.group() if match else None
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i+1]
+
+    return None
 
 mode_prompt = f"""
 You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
@@ -196,6 +208,7 @@ def generate_mode_question(global_questions, prev_questions, max_retries=3):
     #Build final JSON
     return {
         "question_text": question_data["question_text"],
+        "question_topic": question_data["question_topic"],
         "answer_options": answers,
         "correct_answer": solution
     }
