@@ -5,7 +5,8 @@ import { useAuth } from '../../context/AuthContext'
 export default function LLMTest2() {
     const { user } = useAuth()
     
-    const [stats, setStats] = useState({
+    //send accuracy to backend via supabase. 
+    const [accuracyStats, setAccuracyStats] = useState({
         total: {correct: 0, attempts: 0},
         subjects: {
             ordering: {correct: 0, attempts: 0},
@@ -21,7 +22,44 @@ export default function LLMTest2() {
         }
     });
     
-    
+    //sent at start of question generation
+    const sendAccuracyToBackend = async(e) => {
+        e.preventDefault()
+
+        const {data: topicRows, error: topicError} = await supabase
+            .from("math_topics")
+            .select("id, topic_name")
+
+        if (topicError) {
+            console.error(topicError)
+            return
+        }
+
+        const topicMap = {}
+
+        topicRows.forEach(t => {
+            topicMap[t.topic_name] = t.id
+        })
+        //POSSIBLY - need to match supabase table, so need correct/attempted rows
+        const rows = Object.entries(accuracyStats.subjects).map(([topicName, values]) => ({
+            user_id: user.id,
+            topic_id: topicMap[topicName],
+            correct_questions: Number(values.correct) || null,
+            attempted_questions: Number(values.attempts) || null
+        }))
+
+        const {error} = await supabase
+        .from("user_math_performance")
+        .upsert(rows, {
+            onConflict: "user_id,topic_id"
+        })
+        
+        if (error) {
+            console.error(error)
+        } else {
+            console.log("Accuracy sent to backend")
+        }
+    }
     
     
     const[data, setData] = useState(null)
@@ -35,6 +73,7 @@ export default function LLMTest2() {
 
     useEffect(() => { //obtain question/answer options from backend. 
         if (!showGenerateQuestionButton) 
+        sendAccuracyToBackend() //send accuracy for previous question before fetching new one.
         fetch('http://localhost:5000/')
         .then(response => response.json())
         .then(data => {
@@ -81,7 +120,7 @@ export default function LLMTest2() {
 
     //NEED to go back and ensure question_topic is in JSON
     const updateStats = (correct) => {
-        setStats(prevStats => {
+        setAccuracyStats(prevStats => {
             const newStats = {...prevStats};
             const topic = data.question_topic
 
@@ -100,17 +139,17 @@ export default function LLMTest2() {
     //Save stats to local storage so they persist across refreshes.
     //Should modify later to ensure saved to user
     useEffect(() => {
-        const saved = localStorage.getItem("stats");
-        if (saved) setStats(JSON.parse(saved));
+        const saved = localStorage.getItem("accuracyStats");
+        if (saved) setAccuracyStats(JSON.parse(saved));
     }, [])
 
     useEffect(() => {
-        localStorage.setItem("stats", JSON.stringify(stats));
-    }, [stats])
+        localStorage.setItem("accuracyStats", JSON.stringify(accuracyStats));
+    }, [accuracyStats])
 
 
     const getAccuracy = (topic) => {
-        const subjectStats = stats.subjects[topic]
+        const subjectStats = accuracyStats.subjects[topic]
         if (subjectStats.attempts === 0) return 0
         return (subjectStats.correct / subjectStats.attempts) * 100
     };
