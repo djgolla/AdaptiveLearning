@@ -92,7 +92,7 @@ def median(values):
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
 #If solution is a fraction, at least one other generated response should be a fraction. 
-def generate_median_question(global_questions, prev_questions, max_retries=3):
+def generate_median_question(global_questions, prev_questions,difficulty, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = median_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
@@ -106,7 +106,9 @@ def generate_median_question(global_questions, prev_questions, max_retries=3):
             + "\n".join(q["text"] for q in global_questions)
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
-
+        prompt += (
+            "\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+        )
         response = generate(
             model="llama3.1:8b",
             prompt=prompt,

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../lib/supabase'
 
-//no supabase - just direct contact w/ test3 to see how question generation is working. 
 export default function LLMTest2() {
     const { user } = useAuth()
     
@@ -24,8 +24,6 @@ export default function LLMTest2() {
     
     //sent at start of question generation
     const sendAccuracyToBackend = async(e) => {
-        e.preventDefault()
-
         const {data: topicRows, error: topicError} = await supabase
             .from("math_topics")
             .select("id, topic_name")
@@ -71,24 +69,44 @@ export default function LLMTest2() {
     const [submitted, setSubmitted] = useState(false)
     const [correct, setCorrect] = useState(false)
 
-    useEffect(() => { //obtain question/answer options from backend. 
-        if (!showGenerateQuestionButton) 
-        sendAccuracyToBackend() //send accuracy for previous question before fetching new one.
-        fetch('http://localhost:5000/')
-        .then(response => response.json())
-        .then(data => {
+    // useEffect(() => { //obtain question/answer options from backend. 
+    //     if (!showGenerateQuestionButton) 
+    //     sendAccuracyToBackend() //send accuracy for previous question before fetching new one.
+    //     fetch('http://localhost:5000/')
+    //     .then(response => response.json())
+    //     .then(data => {
+    //         if (!data || !data.question_text) {
+    //             throw new Error("Invalid response")
+    //         }
+    //         setData(data)
+    //     })
+    //     .catch(error => {
+    //         console.error('Error fetching data:', error);
+    //         //alert("Failed to load question. Try again.");
+    //         setError(true);
+    //         setShowGenerateQuestionButton(true); // allow user to try again
+    //     });
+    // }, [showGenerateQuestionButton]); //re-run whenever button is clicked to generate new question.
+
+    const fetchQuestion = async() => {
+        try {
+            await sendAccuracyToBackend() //send accuracy for previous question before fetching new one.
+            const response = await fetch(`http://localhost:5000/?user_id=${user.id}`)
+            const data = await response.json()
+            
             if (!data || !data.question_text) {
-                throw new Error("Invalid response")
+            throw new Error("Invalid response")
             }
             setData(data)
-        })
-        .catch(error => {
-            console.error('Error fetching data:', error);
-            //alert("Failed to load question. Try again.");
-            setError(true);
-            setShowGenerateQuestionButton(true); // allow user to try again
-        });
-    }, [showGenerateQuestionButton]); //re-run whenever button is clicked to generate new question.
+        } catch (error) {
+        console.error(error);
+        setError(true);
+        setShowGenerateQuestionButton(true);
+        }
+    }
+    
+    
+
 
     const handleAnswerSelect = (index) => {
         setSelectedAnswer(index)
@@ -103,19 +121,17 @@ export default function LLMTest2() {
         setSelectedAnswer(null);
         setData(null);
 
-        setShowGenerateQuestionButton(false); // triggers fetch
+        setShowGenerateQuestionButton(false); 
+        fetchQuestion()
         };
 
     const handleSubmit = () => {
-        setSubmitted(true)
-        
-        if (data.answer_options[selectedAnswer] === data.correct_answer) {
-        setCorrect(true)
-        } else {
-            setCorrect(false)
-        }
+        const isCorrect = data.answer_options[selectedAnswer] === data.correct_answer
 
-        updateStats(correct)
+        setSubmitted(true)
+        setCorrect(isCorrect)
+
+        updateStats(isCorrect) 
     }
 
     //NEED to go back and ensure question_topic is in JSON
