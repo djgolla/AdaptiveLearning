@@ -137,15 +137,22 @@ def LLM_topic_decider(user_id):
         # If we reach here → SUCCESS
         break
 
-    else:
-        # All retries failed
-        raise ValueError("(topic selection)Failed to generate valid JSON after retries")
+    # else:
+    #     # All retries failed
+    #     raise ValueError("(topic selection)Failed to generate valid JSON after retries")
     
-    #WILL add check later to default to randomized selection if LLM topic selection fails. 
-    topic = topic_data["topic"]
-    difficulty = topic_data["difficulty"]
-    question = question_generation(topic,difficulty)
 
+    if (topic_data):
+        #WILL add check later to default to randomized selection if LLM topic selection fails. 
+        topic = topic_data["topic"]
+        difficulty = topic_data["difficulty"]
+        
+    else:
+        print("LLM selection generation failed, fallback to randomized selection")
+        topic,difficulty = randomize_selection(accuracy_response)
+    
+   
+    question = question_generation(topic, difficulty)
     print(question)
     return question
 
@@ -246,6 +253,52 @@ def question_generation(topic, difficulty):
                     "text": response["question_text"],
                     "topic": "angle_relationships"})
     return response
+
+def randomize_selection(accuracy_response):
+    num = random.randint(0, 9)
+    match num:
+        case 0:
+            topic = "ordering"
+        case 1:
+            topic = "rationals"
+        case 2:
+            topic = "expressions"
+        case 3:
+            topic = "algebra"
+        case 4:
+            topic = "geometry"
+        case 5:
+            topic = "angle_relationships"
+        case 6:
+            topic = "mean"
+        case 7:
+            topic = "median"
+        case 8: 
+            topic = "mode"
+        case 9:
+            topic = "probability"
+        
+    #get accuracy from supabase, select difficulty level accordingly 
+    for row in accuracy_response.data or []:
+        if row.get("math_topics", {}).get("topic_name") == topic:
+            correct = row.get("correct_questions") or 0
+            attempted = row.get("attempted_questions") or 0
+            break 
+
+    if attempted == 0:
+        accuracy = 0
+    else:
+        accuracy = correct / attempted
+
+    if accuracy < 0.4:
+        difficulty = "easy"
+    elif accuracy < 0.7:
+        difficulty = "medium"
+    else:
+        difficulty = "hard"
+    
+    return topic, difficulty
+
 
 #select from 11 math topics
 #POSSIBLY can have LLM select topic first given things like stress/accuracy

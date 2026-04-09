@@ -126,8 +126,8 @@ export default function LLMTest2() {
         };
 
     const handleSubmit = () => {
-        const isCorrect = data.answer_options[selectedAnswer] === data.correct_answer
-
+        // const isCorrect = data.answer_options[selectedAnswer] === data.correct_answer
+        const isCorrect = JSON.stringify(data.answer_options[selectedAnswer]) === JSON.stringify(data.correct_answer)
         setSubmitted(true)
         setCorrect(isCorrect)
 
@@ -204,7 +204,7 @@ export default function LLMTest2() {
                         marginBottom: "10px"
                     }}
                     >
-                    {option}
+                    {Array.isArray(option) ? option.join(", ") : option}
                     </button>
                 ))}
                 </div>

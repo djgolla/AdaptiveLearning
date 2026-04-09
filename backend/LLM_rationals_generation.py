@@ -84,7 +84,7 @@ def generate_rational_question(global_questions, prev_questions,difficulty, max_
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
         prompt += (
-            "\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
         )
         response = generate(
             model="llama3.1:8b",

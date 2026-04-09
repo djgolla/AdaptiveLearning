@@ -86,7 +86,7 @@ def generate_mean_question(global_questions,prev_questions,difficulty, max_retri
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
         prompt += (
-            "\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
         )
         response = generate(
             model="llama3.1:8b",
@@ -197,7 +197,7 @@ def generate_mean_question(global_questions,prev_questions,difficulty, max_retri
     #Build final JSON
     return {
         "question_text": question_data["question_text"],
-        "question_topic": question_data["question_topic"],
+        "question_topic": "mean",
         "answer_options": answers,
         "correct_answer": solution
     }
