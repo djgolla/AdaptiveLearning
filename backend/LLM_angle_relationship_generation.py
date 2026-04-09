@@ -20,8 +20,20 @@ from sympy.parsing.sympy_parser import (
 transformations = (standard_transformations + (implicit_multiplication_application,))
 
 def extract_json(text):
-    match = re.search(r"\{.*?\}", text, re.DOTALL)
-    return match.group() if match else None
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i+1]
+
+    return None
 
 def to_native(value): 
     if isinstance(value, Integer): 
@@ -126,20 +138,40 @@ solution = -1
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
 #If solution is a fraction, at least one other generated response should be a fraction. 
-def generate_angle_relationship_question(max_retries=3):
+def generate_angle_relationship_question(global_questions,prev_questions, difficulty, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = angle_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
         else:
             prompt = angle_prompt
 
+
+        #randomize scenario selection to ensure variety in generated questions.
+        scenario = random.randint(1,5)
+
+        prompt += f"\nYOU must generate a question for scenario {scenario}."
+        print(scenario)
+
+
+        prompt += (
+            "\nPreviously generated questions:\n"
+            + "\n".join(q["text"] for q in prev_questions)
+            + "\n\nRecent global questions:\n"
+            + "\n".join(q["text"] for q in global_questions)
+            + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
+        )
+
+        prompt += (
+            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+        )
+
         response = generate(
             model="llama3.1:8b",
             prompt=prompt,
             options={
-                "temperature": 0.9,
-                "top_p": 0.9,
-                "top_k": 75
+                "temperature": 1.1, #more creativity
+                "top_p": 0.95, #more diversity
+                "top_k": 100 #broader token sampling.
             }
         )
 
@@ -255,6 +287,7 @@ def generate_angle_relationship_question(max_retries=3):
     #Build final JSON
     return {
         "question_text": question_data["question_text"],
+        "question_topic": "angle_relationships",
         "answer_options": answers,
         "correct_answer": solution
     }

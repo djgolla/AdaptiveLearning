@@ -30,8 +30,20 @@ def normalize(value):
     except: 
         raise ValueError(f"Invalid value: {value}")
 def extract_json(text):
-    match = re.search(r"\{.*?\}", text, re.DOTALL)
-    return match.group() if match else None
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i+1]
+
+    return None
 
 ordering_prompt = f"""
 You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
@@ -68,22 +80,46 @@ def solve_ordering(values, direction="least_to_greatest"):
 
     return [v[0] for v in sorted_vals]
 
+def shuffle_incorrect_answers(solution):
+    incorrect_answers = set()
 
+    while len(incorrect_answers) < 3:
+        shuffled = solution.copy()
+        random.shuffle(shuffled)
 
-def generate_ordering_question(max_retries=3):
+        if shuffled == solution:
+            shuffled = solution.copy()
+            shuffled[0], shuffled[1] = shuffled[1], shuffled[0]
+        
+        incorrect_answers.add(tuple(shuffled))
+
+    return [list(ans) for ans in incorrect_answers]
+
+def generate_ordering_question(global_questions, prev_questions,difficulty, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = ordering_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
         else:
             prompt = ordering_prompt
 
+
+        prompt += (
+            "\nPreviously generated questions:\n"
+            + "\n".join(q["text"] for q in prev_questions)
+            + "\n\nRecent global questions:\n"
+            + "\n".join(q["text"] for q in global_questions)
+            + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
+        )
+        prompt += (
+            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+        )
         response = generate(
             model="llama3.1:8b",
             prompt=prompt,
             options={
-                "temperature": 0.9,
-                "top_p": 0.9,
-                "top_k": 75
+                "temperature": 1.1, #more creativity
+                "top_p": 0.95, #more diversity
+                "top_k": 100 #broader token sampling.
             }
         )
 
@@ -118,77 +154,77 @@ def generate_ordering_question(max_retries=3):
     if question_data: 
         solution = solve_ordering(question_data["values"], question_data["direction"])
 
-    for attempt in range(max_retries):
-        incorrect_solution_prompt = f"""
-        Generate three incorrect numerical answer options for a math problem.
-        Question:
-        {question_data["question_text"]}
-        Correct Answer:
-        {solution}
+    # for attempt in range(max_retries):
+    #     incorrect_solution_prompt = f"""
+    #     Generate three incorrect numerical answer options for a math problem.
+    #     Question:
+    #     {question_data["question_text"]}
+    #     Correct Answer:
+    #     {solution}
 
-        Rules:
-        - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
-        - The answers must NOT equal or simplify to {solution}. However, each incorrect answer should contain each individual value from the solution.
-        - Each answer should be an array of values derived from the solution. No other numbers should be involved in an answer.
-        - The number of values in each incorrect answer should be the same as the number of values in the correct solution.
-        - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
-        {{
-        "incorrect_answers": [
-            ["x", "x", "x"],
-            ["x", "x", "x"],
-            ["x", "x", "x"]
-        ]
-        }}
-        """
+    #     Rules:
+    #     - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
+    #     - The answers must NOT equal or simplify to {solution}. However, each incorrect answer should contain each individual value from the solution.
+    #     - Each answer should be an array of values derived from the solution. No other numbers should be involved in an answer.
+    #     - The number of values in each incorrect answer should be the same as the number of values in the correct solution.
+    #     - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
+    #     {{
+    #     "incorrect_answers": [
+    #         ["x", "x", "x"],
+    #         ["x", "x", "x"],
+    #         ["x", "x", "x"]
+    #     ]
+    #     }}
+    #     """
 
-        if (solution != None):
-            answer_response = generate(model="llama3.1:8b",
-                                    prompt=incorrect_solution_prompt,
-                                    options = {"temperature": 0.4,
-                                                "top_p": 0.9,
-                                                "top_k": 40}) #slightly less randomness, 
-        if attempt > 0:
-            incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
+    #     if (solution != None):
+    #         answer_response = generate(model="llama3.1:8b",
+    #                                 prompt=incorrect_solution_prompt,
+    #                                 options = {"temperature": 0.4,
+    #                                             "top_p": 0.9,
+    #                                             "top_k": 40}) #slightly less randomness, 
+    #     if attempt > 0:
+    #         incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
 
-        raw = extract_json(answer_response.response)
+    #     raw = extract_json(answer_response.response)
 
-        if not raw:
-            print(f"[Attempt {attempt+1}] No JSON found")
-            print(answer_response.response)
-            continue
+    #     if not raw:
+    #         print(f"[Attempt {attempt+1}] No JSON found")
+    #         print(answer_response.response)
+    #         continue
 
-        try:
-            answer_data = json.loads(raw)
-        except Exception as e:
-            print(f"[Attempt {attempt+1}] JSON parse failed:", e)
-            print(answer_response.response)
-            continue
+    #     try:
+    #         answer_data = json.loads(raw)
+    #     except Exception as e:
+    #         print(f"[Attempt {attempt+1}] JSON parse failed:", e)
+    #         print(answer_response.response)
+    #         continue
 
-        # Validate required keys
-        required_keys = ["incorrect_answers"]
-        if not all(k in answer_data for k in required_keys):
-            print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
-            continue
+    #     # Validate required keys
+    #     required_keys = ["incorrect_answers"]
+    #     if not all(k in answer_data for k in required_keys):
+    #         print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
+    #         continue
 
-        # If we reach here → SUCCESS
-        break
+    #     # If we reach here → SUCCESS
+    #     break
 
-    else:
-        # All retries failed
-        raise ValueError("Failed to generate valid JSON after retries")
+    # else:
+    #     # All retries failed
+    #     raise ValueError("Failed to generate valid JSON after retries")
 
-    #combining generated incorrect responses with correct solution. 
-    incorrect_data = answer_data
-    #parsed_incorrect = [ast.literal_eval(ans) for ans in incorrect_data["incorrect_answers"]]
+    # #combining generated incorrect responses with correct solution. 
+    # incorrect_data = answer_data
 
-    #answers = parsed_incorrect + [solution]
-
-    answers = incorrect_data["incorrect_answers"] + [solution]
+    incorrect_answers = shuffle_incorrect_answers(solution)
+    answers = incorrect_answers + [solution]
+    #answers = incorrect_data["incorrect_answers"] + [solution]
     random.shuffle(answers)
 
     #Build final JSON
     return {
         "question_text": question_data["question_text"],
+        "question_topic": "ordering",
         "answer_options": answers,
         "correct_answer": solution
     }
