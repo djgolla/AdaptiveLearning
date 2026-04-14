@@ -134,7 +134,6 @@ export default function LLMTest2() {
         updateStats(isCorrect) 
     }
 
-    //NEED to go back and ensure question_topic is in JSON
     const updateStats = (correct) => {
         setAccuracyStats(prevStats => {
             const newStats = {...prevStats};
