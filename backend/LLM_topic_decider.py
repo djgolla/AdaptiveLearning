@@ -14,9 +14,11 @@ import LLM_mode_generation, LLM_probability_generation, LLM_geometry_generation,
 
 #connect with supabase 
 load_dotenv() 
-url = os.getenv("VITE_SUPABASE_URL")
-key = os.getenv("VITE_SUPABASE_ANON_KEY")
-supabase = create_client(url,key)
+# url = os.getenv("VITE_SUPABASE_URL")
+# key = os.getenv("VITE_SUPABASE_ANON_KEY")
+SUPABASE_URL     = os.getenv("SUPABASE_URL")
+SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
 
 #Store 10 
 history = {

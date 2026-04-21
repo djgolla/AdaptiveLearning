@@ -177,7 +177,7 @@ def generate_expression_question(global_questions, prev_questions, difficulty, m
             solution = sp.simplify(expr)
     
     #print("Solution:", solution)
-    solution = str(solution) if solution else None
+    solution = str(solution) if solution is not None else None
 
     for attempt in range(max_retries):
 
@@ -200,14 +200,21 @@ def generate_expression_question(global_questions, prev_questions, difficulty, m
         }}
         """
 
-        if (solution != None):
+        if attempt > 0:
+            incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
+
+        answer_response = None
+
+        if solution is not None:
             answer_response = generate(model="llama3.1:8b",
                                     prompt=incorrect_solution_prompt,
                                     options = {"temperature": 0.4,
                                                 "top_p": 0.9,
                                                 "top_k": 40}) #slightly less randomness, 
-        if attempt > 0:
-            incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
+
+        if answer_response is None:
+            print("Answer generation failed")
+            continue
 
         raw = extract_json(answer_response.response)
 
