@@ -57,7 +57,13 @@ export default function Adaptive() {
     setError(false)
     try {
       await sendAccuracyToBackend()
-      const res  = await fetch(`http://localhost:5000/?user_id=${user.id}`)
+      // const res  = await fetch(`http://localhost:5000/?user_id=${user.id}`)
+      const res = await fetch(`http://localhost:8000/api/generate-question?user_id=${user.id}`, {
+        method: 'GET', 
+        headers: {//NOT SURE IF NEEDED
+          'Authorization': `Bearer ${user.access_token}`
+        }
+      })
       const json = await res.json()
       if (!json?.question_text) throw new Error('Invalid response')
       setData(json)

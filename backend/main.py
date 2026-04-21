@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Request, HTTPException, Path, Body
+from fastapi import FastAPI, Request, HTTPException, Path, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os, requests, random, string
 from datetime import datetime
 from dotenv import load_dotenv
 from supabase import create_client
+
+import LLM_topic_decider
 
 load_dotenv()
 
@@ -72,6 +74,19 @@ def get_questions(limit: int = 100, subject: str | None = None, difficulty: str 
     if difficulty: q = q.eq("difficulty", difficulty)
     res = q.execute()
     return res.data or []
+
+
+# ─── llm generation ────────────────────────────────────────────────────────────────
+@app.get("/api/generate-question")
+def generate_question(user_id: str = Query(...)):
+    # user_id = requests.request.args.get("user_id")
+    # if not user_id:
+    #     return jsonify({"error": "Missing user_id"}), 400
+    question = LLM_topic_decider.LLM_topic_decider(user_id)
+
+    if not question:
+        raise HTTPException(status_code=500, detail="Failed to generate question")
+    return question
 
 
 # ─── sessions ─────────────────────────────────────────────────────────────────
