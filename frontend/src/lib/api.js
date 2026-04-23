@@ -14,6 +14,7 @@ async function getAccessToken() {
 
 export async function apiFetch(path, { method = 'GET', body = null } = {}) {
   const token = await getAccessToken()
+  // console.log("TOKEN:", token)
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 

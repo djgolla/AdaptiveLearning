@@ -8,6 +8,8 @@ from ollama import generate
 import json
 import random
 from collections import deque
+
+from supabase_auth import datetime
 import LLM_algebra_generation, LLM_ordering_generation, LLM_rationals_generation, LLM_mean_generation, LLM_median_generation
 import LLM_mode_generation, LLM_probability_generation, LLM_geometry_generation, LLM_angle_relationship_generation, LLM_expressions_generation
 #python -m flask --app LLM_topic_decider run
@@ -20,20 +22,28 @@ SUPABASE_URL     = os.getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
 
+
+#Possibly worthwhile to store history in supabase. 
 #Store 10 
-history = {
-    "global": deque(maxlen=10), #stores last 10 questions regardless of topic, can use to ensure no repeats
-    "geometry": deque(maxlen=10),
-    "algebra": deque(maxlen=10),
-    "expressions": deque(maxlen=10),
-    "ordering": deque(maxlen=10),
-    "rationals": deque(maxlen=10),
-    "mean": deque(maxlen=10),
-    "median": deque(maxlen=10),
-    "mode": deque(maxlen=10),
-    "probability": deque(maxlen=10),
-    "angle_relationships": deque(maxlen=10)
-}
+user_histories = {}
+
+def get_user_history(user_id):
+    if user_id not in user_histories:
+        user_histories[user_id] = {
+            "global": deque(maxlen=10), #stores last 10 questions regardless of topic, can use to ensure no repeats
+            "geometry": deque(maxlen=10),
+            "algebra": deque(maxlen=10),
+            "expressions": deque(maxlen=10),
+            "ordering": deque(maxlen=10),
+            "rationals": deque(maxlen=10),
+            "mean": deque(maxlen=10),
+            "median": deque(maxlen=10),
+            "mode": deque(maxlen=10),
+            "probability": deque(maxlen=10),
+            "angle_relationships": deque(maxlen=10)
+        }
+    return user_histories[user_id]
+
 
 def extract_json(text):
     start = text.find("{")
@@ -51,15 +61,36 @@ def extract_json(text):
 
     return None
 
-def LLM_topic_decider(user_id): 
+def add_question_to_supabase(question, difficulty):
+    questions = supabase.table("questions").select("question_text").execute().data or []
 
-    #not sure if correct 
+    if any(q["question_text"] == question["question_text"] for q in questions):
+        return False
+
+    response = supabase.table("questions").insert({
+        "subject" : question["question_topic"],
+        "difficulty": difficulty,
+        "question_text": question["question_text"],
+        "options" : question["answer_options"],
+        "correct_answer": question["correct_answer"],
+        "created_at": str(datetime.now())
+    }).execute()
+    
+    if response.data:
+        return True
+    else:
+        print("Supabase insert error:", response.error)
+        return False
+
+def LLM_topic_decider(user_id): 
     accuracy_response = supabase.table("user_math_performance") \
         .select("correct_questions,attempted_questions, math_topics(topic_name)") \
         .eq("user_id", user_id) \
         .execute()
 
     json_response = accuracy_response.data or []
+
+    history = get_user_history(user_id)
 
     prompt = f"""
         You are a function that returns ONLY valid JSON.
@@ -154,13 +185,20 @@ def LLM_topic_decider(user_id):
         topic,difficulty = randomize_selection(accuracy_response)
     
    
-    question = question_generation(topic, difficulty)
+    question = question_generation(topic, difficulty, user_id)
     print(question)
+
+
+    if (add_question_to_supabase(question, difficulty)):
+        print("Question added to supabase successfully")
+
+
     return question
 
 
 #Theres probably a cleaner way to do this - have a list of topics and then loop through to find the right one, rather than hardcoding every option. But this works for now.
-def question_generation(topic, difficulty):
+def question_generation(topic, difficulty, user_id):
+    history = get_user_history(user_id)
     print(f"topic: {topic} difficulty: {difficulty}")
     match topic:
         case "ordering":
