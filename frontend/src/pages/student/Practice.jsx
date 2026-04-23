@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { apiFetch } from '../../lib/api'
+import { supabase } from '../../lib/supabase'
 
 const TIMER = 60
 
@@ -11,13 +12,23 @@ export default function Practice() {
   const [index, setIndex]       = useState(0)
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState(null)
+  const [selectedAnswer, setSelectedAnswer] = useState(null)
   const [revealed, setRevealed] = useState(false)
   const [score, setScore]       = useState(0)
   const [finished, setFinished] = useState(false)
   const [timeLeft, setTimeLeft] = useState(TIMER)
   const timerRef = useRef(null)
 
-  useEffect(() => { startSession() }, [])
+  // useEffect(() => { startSession() }, [])
+  useEffect(() => {
+    async function init() {
+      const { data } = await supabase.auth.getSession()
+      if (data.session) {
+        startSession()
+      }
+    }
+    init()
+  }, [])
 
   useEffect(() => {
     if (loading || finished) return
@@ -46,14 +57,27 @@ export default function Practice() {
     }
   }
 
+  function normalize(val) {
+  if (Array.isArray(val)) return val.join(', ')
+  return String(val).trim()
+  }
+
   async function postAnswer(q, idx) {
     if (!session) return
-    try {
-      await apiFetch(`/api/sessions/${session.id}/answer`, {
-        method: 'POST',
-        body: { question_id: q.id, selected_index: idx, correct: idx === q.correct_index }
-      })
-    } catch {}
+
+    const selectedVal = idx >= 0 ? q.options[idx] : null
+    const isCorrect = selectedVal !== null && normalize(selectedVal) === normalize(q.options[q.correct_index])
+    
+    await apiFetch(`/api/sessions/${session.id}/answer`, {
+      method: 'POST',
+      body: { question_id: q.id, selected_index: idx, correct: isCorrect }
+    })
+    // try {
+    //   await apiFetch(`/api/sessions/${session.id}/answer`, {
+    //     method: 'POST',
+    //     body: { question_id: q.id, selected_index: idx, correct: idx === q.correct_index }
+    //   })
+    // } catch {}
   }
 
   async function endSession(id) {
@@ -72,7 +96,12 @@ export default function Practice() {
     setSelected(idx)
     setRevealed(true)
     const q = questions[index]
-    if (idx === q.correct_index) setScore(s => s + 1)
+    setSelectedAnswer(q.options[idx])
+    const selectedVal = q.options[idx]
+    if (normalize(selectedVal) === normalize(q.options[q.correct_index])) {
+      setScore(s => s + 1)
+    }
+    // if (idx === q.correct_index) setScore(s => s + 1)
     await postAnswer(q, idx)
   }
 
@@ -83,6 +112,7 @@ export default function Practice() {
     } else {
       setIndex(i => i + 1)
       setSelected(null)
+      setSelectedAnswer(null)
       setRevealed(false)
     }
   }
@@ -124,7 +154,7 @@ export default function Practice() {
             </div>
           </div>
           <div className="flex gap-3 justify-center">
-            <button onClick={() => { setFinished(false); setIndex(0); setScore(0); setSelected(null); setRevealed(false); startSession() }}
+            <button onClick={() => { setFinished(false); setIndex(0); setScore(0); setSelected(null); setSelectedAnswer(null); setRevealed(false); startSession() }}
               className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition">
               Try Again
             </button>
@@ -176,8 +206,10 @@ export default function Practice() {
         <div className="space-y-3">
           {q.options.map((opt, i) => {
             let style = 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:border-indigo-300'
+            const isCorrectOption = normalize(opt) === normalize(q.correct_answer)
             if (revealed) {
-              if (i === q.correct_index) style = 'border-green-400 bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+              // if (i === q.correct_index) style = 'border-green-400 bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+              if (isCorrectOption) style = 'border-green-400 bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200'
               else if (i === selected)   style = 'border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-800 dark:text-rose-200'
               else style = 'border-gray-100 dark:border-gray-700 opacity-50'
             } else if (selected === i) {
@@ -191,9 +223,15 @@ export default function Practice() {
                 <span className="w-7 h-7 flex-shrink-0 rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center text-sm font-bold text-gray-600 dark:text-gray-300">
                   {String.fromCharCode(65 + i)}
                 </span>
-                <span>{opt}</span>
-                {revealed && i === q.correct_index && <span className="ml-auto text-green-500 text-lg">✓</span>}
-                {revealed && i === selected && i !== q.correct_index && <span className="ml-auto text-rose-500 text-lg">✗</span>}
+                <span>{Array.isArray(opt) ? opt.join(', ') : opt}</span>
+                {/* {revealed && i === q.correct_index && <span className="ml-auto text-green-500 text-lg">✓</span>}
+                {revealed && i === selected && i !== q.correct_index && <span className="ml-auto text-rose-500 text-lg">✗</span>} */}
+                {revealed && normalize(opt) === normalize(q.correct_answer) && (
+                <span className="ml-auto text-green-500 text-lg">✓</span>
+                )}
+                {revealed && selected === i && !isCorrectOption && (
+                <span className="ml-auto text-rose-500 text-lg">✗</span>
+                )}
               </motion.button>
             )
           })}

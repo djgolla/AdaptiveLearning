@@ -141,6 +141,12 @@ def generate_mode_question(global_questions, prev_questions,difficulty, max_retr
     parts = question_data['variables']
     solution = mode(parts)
 
+    if solution:
+        if len(solution) == 1:
+            solution = solution[0]   # unwrap single value
+        else:
+            solution = solution     # keep list for multiple modes
+
     #print("Solution:", solution)
     solution = str(solution) if solution else None
 

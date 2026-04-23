@@ -36,7 +36,11 @@ def get_user(request: Request):
     token = request.headers.get("authorization", "").replace("Bearer ", "").strip()
     if not token:
         raise HTTPException(401, "Missing token")
-    resp = requests.get(f"{SUPABASE_URL}/auth/v1/user", headers={"Authorization": f"Bearer {token}"})
+    resp = requests.get(f"{SUPABASE_URL}/auth/v1/user", headers={
+    "Authorization": f"Bearer {token}",
+    "apikey": SERVICE_ROLE_KEY
+    })
+    
     if resp.status_code != 200:
         raise HTTPException(401, "Invalid token")
     return resp.json()
@@ -79,9 +83,6 @@ def get_questions(limit: int = 100, subject: str | None = None, difficulty: str 
 # ─── llm generation ────────────────────────────────────────────────────────────────
 @app.get("/api/generate-question")
 def generate_question(user_id: str = Query(...)):
-    # user_id = requests.request.args.get("user_id")
-    # if not user_id:
-    #     return jsonify({"error": "Missing user_id"}), 400
     question = LLM_topic_decider.LLM_topic_decider(user_id)
 
     if not question:
