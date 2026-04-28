@@ -24,6 +24,8 @@ supabase = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
 
 
 #Possibly worthwhile to store history in supabase. 
+#Possibly reset history per session. 
+
 #Store 10 
 user_histories = {}
 
@@ -82,7 +84,7 @@ def add_question_to_supabase(question, difficulty):
         print("Supabase insert error:", response.error)
         return False
 
-def LLM_topic_decider(user_id): 
+def LLM_topic_decider(user_id, grade): 
     accuracy_response = supabase.table("user_math_performance") \
         .select("correct_questions,attempted_questions, math_topics(topic_name)") \
         .eq("user_id", user_id) \
@@ -108,6 +110,7 @@ def LLM_topic_decider(user_id):
         INPUT:
         performance = {json_response}
         history = {history}
+        grade = {grade}
 
         RULES (CRITICAL):
         - Use ONLY the provided performance data. NULL attempted_questions values indicate that the topic has not generated yet.
@@ -118,6 +121,7 @@ def LLM_topic_decider(user_id):
         - If data is missing → accuracy = 0
         - Do NOT explain your reasoning
         - Do NOT output calculations
+        - Select a topic within the select grade level's capabilities. 
         - Output ONLY JSON
 
         SELECTION LOGIC:
@@ -185,7 +189,7 @@ def LLM_topic_decider(user_id):
         topic,difficulty = randomize_selection(accuracy_response)
     
    
-    question = question_generation(topic, difficulty, user_id)
+    question = question_generation(topic, difficulty, user_id, grade)
     print(question)
 
 
@@ -197,13 +201,13 @@ def LLM_topic_decider(user_id):
 
 
 #Theres probably a cleaner way to do this - have a list of topics and then loop through to find the right one, rather than hardcoding every option. But this works for now.
-def question_generation(topic, difficulty, user_id):
+def question_generation(topic, difficulty, user_id, grade):
     history = get_user_history(user_id)
     print(f"topic: {topic} difficulty: {difficulty}")
     match topic:
         case "ordering":
             response = LLM_ordering_generation.generate_ordering_question(history["global"], history["ordering"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "ordering"})
@@ -213,7 +217,7 @@ def question_generation(topic, difficulty, user_id):
 
         case "geometry":
             response = LLM_geometry_generation.generate_geometry_question(history["global"], history["geometry"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "geometry"})
@@ -222,7 +226,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "geometry"})
         case "algebra":
             response = LLM_algebra_generation.generate_algebra_question(history["global"], history["algebra"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "algebra"})
@@ -231,7 +235,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "algebra"})
         case "expressions":
             response = LLM_expressions_generation.generate_expression_question(history["global"], history["expressions"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "expressions"})
@@ -240,7 +244,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "expressions"})
         case "rationals":
             response = LLM_rationals_generation.generate_rational_question(history["global"], history["rationals"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "rationals"})
@@ -249,7 +253,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "rationals"})
         case "mean":
             response = LLM_mean_generation.generate_mean_question(history["global"], history["mean"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "mean"})
@@ -258,7 +262,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "mean"})
         case "median":
             response = LLM_median_generation.generate_median_question(history["global"], history["median"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "median"})
@@ -267,7 +271,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "median"})
         case "mode":
             response = LLM_mode_generation.generate_mode_question(history["global"], history["mode"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "mode"})
@@ -276,7 +280,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "mode"})
         case "probability":
             response = LLM_probability_generation.generate_probability_question(history["global"], history["probability"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "probability"})
@@ -285,7 +289,7 @@ def question_generation(topic, difficulty, user_id):
                     "topic": "probability"})
         case "angle_relationships":
             response = LLM_angle_relationship_generation.generate_angle_relationship_question(history["global"], history["angle_relationships"],
-                difficulty=difficulty)
+                difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
                     "topic": "angle_relationships"})

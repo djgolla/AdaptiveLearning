@@ -75,7 +75,7 @@ def solve_dice(sides, target):
 
 
 prob_prompt = f"""
-You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
+You are to provide a Math question suitable for students. The response must be in JSON format. 
 The Question Text, Question Topic, Scenario, Items, and Target will be displayed. The Question Topic will always be "probability"
 There will be three possible scenarios to select from. You must select only ONE scenario to generate a question and corresponding JSON response for.
 
@@ -139,7 +139,7 @@ solution = -1
 #If solution is a fraction, at least one other generated response should be a fraction. 
 
 #LLM seems to have poor randomization of scenarios, for now selecting randomized scenario for it.
-def generate_probability_question(global_questions, prev_questions, difficulty,max_retries=3):
+def generate_probability_question(global_questions, prev_questions, difficulty, grade, max_retries=3):
 
 
     for attempt in range(max_retries):
@@ -162,7 +162,7 @@ def generate_probability_question(global_questions, prev_questions, difficulty,m
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
         prompt += (
-            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a {grade} student would consider to be of {difficulty} difficulty.\n"
         )
         response = generate(
             model="llama3.1:8b",

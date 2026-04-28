@@ -82,8 +82,8 @@ def get_questions(limit: int = 100, subject: str | None = None, difficulty: str 
 
 # ─── llm generation ────────────────────────────────────────────────────────────────
 @app.get("/api/generate-question")
-def generate_question(user_id: str = Query(...)):
-    question = LLM_topic_decider.LLM_topic_decider(user_id)
+def generate_question(user_id: str = Query(...), grade: str = Query(...)):
+    question = LLM_topic_decider.LLM_topic_decider(user_id, grade)
 
     if not question:
         raise HTTPException(status_code=500, detail="Failed to generate question")
