@@ -42,7 +42,7 @@ def is_number(val):
         except:
             return False
 median_prompt = f"""
-You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
+You are to provide a Math question suitable for students. The response must be in JSON format. 
 The Question Text, Question Topic, and Variables will be displayed. The Question Topic will be "median".
 
 Median example: "A group of students recorded the number of minutes they spent studying each day for a week. Their times (in minutes) were: 32, 45, 28, 40, 35, 50, 30. What is the median study time?" 
@@ -92,7 +92,7 @@ def median(values):
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
 #If solution is a fraction, at least one other generated response should be a fraction. 
-def generate_median_question(global_questions, prev_questions,difficulty, max_retries=3):
+def generate_median_question(global_questions, prev_questions,difficulty,grade, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = median_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
@@ -107,7 +107,7 @@ def generate_median_question(global_questions, prev_questions,difficulty, max_re
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
         prompt += (
-            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a {grade} student would consider to be of {difficulty} difficulty.\n"
         )
         response = generate(
             model="llama3.1:8b",

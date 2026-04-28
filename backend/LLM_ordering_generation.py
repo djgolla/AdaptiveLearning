@@ -46,7 +46,7 @@ def extract_json(text):
     return None
 
 ordering_prompt = f"""
-You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
+You are to provide a Math question suitable for students. The response must be in JSON format. 
 The Question Text, Question Topic, and Variables will be displayed. The Question Topic will be "ordering".
 
 Ordering example question: "Order from least to greatest: 3/6, 0.6, 2/3, 0.75". The question text should display the direction
@@ -95,7 +95,7 @@ def shuffle_incorrect_answers(solution):
 
     return [list(ans) for ans in incorrect_answers]
 
-def generate_ordering_question(global_questions, prev_questions,difficulty, max_retries=3):
+def generate_ordering_question(global_questions, prev_questions,difficulty, grade, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = ordering_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
@@ -111,7 +111,7 @@ def generate_ordering_question(global_questions, prev_questions,difficulty, max_
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
         prompt += (
-            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a {grade} student would consider to be of {difficulty} difficulty.\n"
         )
         response = generate(
             model="llama3.1:8b",

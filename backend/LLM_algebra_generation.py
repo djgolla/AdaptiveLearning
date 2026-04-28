@@ -60,7 +60,7 @@ def extract_json(text):
     return None
 
 algebra_prompt = f"""
-You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
+You are to provide a Math question suitable for students. The response must be in JSON format. 
 The Question Text, Question Topic, and Variables will be displayed. The Question Topic will be "algebra".
 
 Algebra example: "Solve for x: 2x + 3 = 7." 
@@ -92,7 +92,7 @@ solution = -1
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
 #If solution is a fraction, at least one other generated response should be a fraction. 
-def generate_algebra_question(global_questions, prev_questions, difficulty, max_retries=3):
+def generate_algebra_question(global_questions, prev_questions, difficulty, grade, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = algebra_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
@@ -108,7 +108,7 @@ def generate_algebra_question(global_questions, prev_questions, difficulty, max_
         )
 
         prompt += (
-            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a {grade} student would consider to be of {difficulty} difficulty.\n"
         )
 
         response = generate(
