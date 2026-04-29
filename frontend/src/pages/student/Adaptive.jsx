@@ -29,6 +29,7 @@ export default function Adaptive() {
   const [correct, setCorrect]       = useState(false)
   const [sessionCount, setSessionCount] = useState(0)
   const [error, setError]           = useState(false)
+  const [grade, setGrade]           = useState('1st Grade')
 
   useEffect(() => {
     localStorage.setItem('accuracyStats', JSON.stringify(accuracyStats))
@@ -58,7 +59,7 @@ export default function Adaptive() {
     try {
       await sendAccuracyToBackend()
       // const res  = await fetch(`http://localhost:5000/?user_id=${user.id}`)
-      const res = await fetch(`http://localhost:8000/api/generate-question?user_id=${user.id}`, {
+      const res = await fetch(`http://localhost:8000/api/generate-question?user_id=${user.id}&grade=${grade}`, {
         method: 'GET', 
         headers: {//NOT SURE IF NEEDED
           'Authorization': `Bearer ${user.access_token}`
@@ -141,6 +142,30 @@ export default function Adaptive() {
                 <p className="text-gray-500 dark:text-gray-400 text-sm mb-6 max-w-sm mx-auto">
                   The AI analyses your performance across 10 topics and picks the one you need most.
                 </p>
+
+              <div className="mb-6">
+                <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2 text-center">
+                  Grade Level
+                </label>
+
+                <select
+                  value={grade}
+                  onChange={(e) => setGrade(e.target.value)}
+                  className="w-full max-w-xs mx-auto block text-center px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                >
+                  <option value="" disabled>Select grade</option>
+
+                  {[
+                    '1st Grade','2nd Grade','3rd Grade','4th Grade','5th Grade',
+                    '6th Grade','7th Grade','8th Grade','Highschool','College'
+                  ].map(d => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
                 <motion.button onClick={fetchQuestion}
                   whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                   className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-bold shadow-lg hover:from-indigo-700 hover:to-violet-700 transition">

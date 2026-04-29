@@ -17,6 +17,10 @@ from flask_cors import CORS #pip install flask-cors
 import sympy as sp #pip install sympy
 from sympy import symbols, Eq, solve, sympify, Integer
 
+#POSSIBLY: manually generate solution using numbers from question_text.
+#This way I can count the # of modes present and ensure solution matches
+#that amount w/ randomly selected numbers. 
+
 def to_native(value): 
     if isinstance(value, Integer): 
         return int(value) 
@@ -38,7 +42,7 @@ def extract_json(text):
     return None
 
 mode_prompt = f"""
-You are to provide a Math question suitable for 6th–8th grade students. The response must be in JSON format. 
+You are to provide a Math question suitable for students. The response must be in JSON format. 
 The Question Text, Question Topic, and Variables will be displayed. The Question Topic will be "mode".
 
 mode example: "A teacher recorded the number of books students finished during a reading challenge. The numbers of books read by the students were: 3, 5, 2, 5, 4, 6, 5, 3. What is the mode of this dataset?" 
@@ -84,7 +88,7 @@ def mode(values):
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
 #If solution is a fraction, at least one other generated response should be a fraction. 
-def generate_mode_question(global_questions, prev_questions,difficulty, max_retries=3):
+def generate_mode_question(global_questions, prev_questions,difficulty, grade, max_retries=3):
     for attempt in range(max_retries):
         if attempt > 0:
             prompt = mode_prompt + "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
@@ -99,7 +103,7 @@ def generate_mode_question(global_questions, prev_questions,difficulty, max_retr
             + "\n\nDO NOT generate a question matching any of the above. Use different wording and numerical values."
         )
         prompt += (
-            f"\nGenerate a question of this topic that a 6-8th grader would consider to be of {difficulty} difficulty.\n"
+            f"\nGenerate a question of this topic that a {grade} student would consider to be of {difficulty} difficulty.\n"
         )
         response = generate(
             model="llama3.1:8b",
