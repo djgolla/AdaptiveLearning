@@ -8,6 +8,7 @@ from ollama import generate
 import json
 import random
 from collections import deque
+import concurrent.futures
 
 from supabase_auth import datetime
 import LLM_algebra_generation, LLM_ordering_generation, LLM_rationals_generation, LLM_mean_generation, LLM_median_generation
@@ -26,13 +27,25 @@ supabase = create_client(SUPABASE_URL, SERVICE_ROLE_KEY)
 #Possibly worthwhile to store history in supabase. 
 #Possibly reset history per session. 
 
-#Store 10 
+user_cache = {}
+def get_user_performance(user_id):
+    if user_id in user_cache:
+        return user_cache[user_id]
+
+    data = supabase.table("user_math_performance") \
+        .select("correct_questions,attempted_questions, math_topics(topic_name)") \
+        .eq("user_id", user_id) \
+        .execute()
+    user_cache[user_id] = data
+    return data
+
+#Store 40 questions globally, 10 per topic 
 user_histories = {}
 
 def get_user_history(user_id):
     if user_id not in user_histories:
         user_histories[user_id] = {
-            "global": deque(maxlen=10), #stores last 10 questions regardless of topic, can use to ensure no repeats
+            "global": deque(maxlen=40), #stores last 40 questions regardless of topic, can use to ensure no repeats
             "geometry": deque(maxlen=10),
             "algebra": deque(maxlen=10),
             "expressions": deque(maxlen=10),
@@ -84,33 +97,103 @@ def add_question_to_supabase(question, difficulty):
         print("Supabase insert error:", response.error)
         return False
 
+
+#Possibility - can just select topic/difficulty manually if LLM generation is too slow. 
+def calculate_topic_and_difficulty(user_id, grade):
+    accuracy_response = get_user_performance(user_id)
+
+    data = accuracy_response.data or []
+    history = get_user_history(user_id)
+
+    topic_scores = []
+
+    for row in data:
+        topic = row["math_topics"]["topic_name"]
+        correct = row.get("correct_questions") or 0
+        attempted = row.get("attempted_questions") or 0
+
+        acc = correct / attempted if attempted > 0 else 0
+
+        # Penalize repetition
+        recent = [q["topic"] for q in history["global"]][-5:]
+        repeat_penalty = recent.count(topic) * 0.1
+
+        score = acc + repeat_penalty
+        topic_scores.append((topic, score))
+
+    # lowest score = worst topic
+    topic = sorted(topic_scores, key=lambda x: x[1])[0][0]
+
+    # difficulty
+    if acc < 0.4:
+        difficulty = "easy"
+    elif acc < 0.7:
+        difficulty = "medium"
+    else:
+        difficulty = "hard"
+
+    return topic, difficulty
+
+
+def parallel_topic_and_difficulty_calculation(topic_prompt, difficulty_prompt):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        topic_future = executor.submit(generate, model="llama3.1:8b", prompt=topic_prompt, options={"temperature": 0.7, "top_p": 0.95, "top_k": 100})
+        difficulty_future = executor.submit(generate, model="llama3.1:8b", prompt=difficulty_prompt, options={"temperature": 0.7, "top_p": 0.95, "top_k": 100})
+
+        topic_response = topic_future.result()
+        difficulty_response = difficulty_future.result()
+
+        if not topic_response or not difficulty_response:
+            print("No response received for topic or difficulty calculation.")
+            return None, None
+
+    return topic_response, difficulty_response
+
+
+#Change: use two separate prompt to try to improve speed and get more "adaptive" results. 
+#Prompt 1: Take in user performance data/recent history, select topic. 
+#Prompt 2: Select difficulty. 
+
+#PROBABLY: need to provide previous and current user performance data so LLM can see differences.  
+#Also should provide last topic selection? not sure since history should cover that. 
 def LLM_topic_decider(user_id, grade): 
-    accuracy_response = supabase.table("user_math_performance") \
-        .select("correct_questions,attempted_questions, math_topics(topic_name)") \
-        .eq("user_id", user_id) \
-        .execute()
+    accuracy_response = get_user_performance(user_id)
 
     json_response = accuracy_response.data or []
 
     history = get_user_history(user_id)
+    recent_global = list(history["global"])[-5:]
 
-    prompt = f"""
+
+    topic_prompt = f"""
         You are a function that returns ONLY valid JSON.
 
         DO NOT include explanations, reasoning, code, markdown, symbols, or extra text.
 
-        TASK:
-        Select:
-        1) A math topic
-        2) A difficulty level
+        INPUT:
+        Student Performance = {json_response}
+        Recent Question History = {recent_global}
+        Student Grade Level = {grade}
+
+        TASK: Select a math topic from the list below. You will be provided with the user's performance data and recent question history. 
+        
+        There are three selection methods you can utilize for topic selection: 
+        1) Improvement: If the user has shown improvement in a topic, you may select that topic to reinforce learning. 
+        2) Struggle: If the user is struggling in a topic, you may select that topic to provide additional practice.
+        3) Random Variation: You may select a random topic to provide variety. 
+        
+        GUIDANCE: 
+        Random variation should be used initially to introduce the user to a variety of topics. As the user accumulates performance data, you should rely more heavily on improvement and struggle-based selection.
+        Struggle should be weighted more heavily than improvement. However, if a user continues to answer a "struggle" topic incorrectly, another topic should be selected for at least the next 5 topic selections.
+
+        Grade Level Impact: 
+        The student's grade level should influnce topic selection. 
+        For example, if a student is in an earlier grade, you may want to prioritize foundational topics like "ordering" or "geometry" over more advanced topics like "probability".
+        Algebra and probability should only appear after grade 6. Grades 1-3 should primarily see ordering, geometry, and expressions. Grades 4-5 can see all topics except probability and algebra. Grade 6+ can see all topics.
+
 
         TOPICS:
         geometry, algebra, expressions, ordering, rationals, mean, median, mode, probability, angle_relationships
-
-        INPUT:
-        performance = {json_response}
-        history = {history}
-        grade = {grade}
 
         RULES (CRITICAL):
         - Use ONLY the provided performance data. NULL attempted_questions values indicate that the topic has not generated yet.
@@ -121,54 +204,90 @@ def LLM_topic_decider(user_id, grade):
         - If data is missing → accuracy = 0
         - Do NOT explain your reasoning
         - Do NOT output calculations
-        - Select a topic within the select grade level's capabilities. 
         - Output ONLY JSON
-
-        SELECTION LOGIC:
-        - Choose the topic with the LOWEST accuracy
-        - You may slightly vary topic choice to avoid repetition using history
-
-        DIFFICULTY RULES:
-        - accuracy < 40% → "easy"
-        - 40%–70% → "medium"
-        - > 70% → "hard"
 
         OUTPUT FORMAT (STRICT):
         Return ONLY this JSON. No extra text.
 
         {{
             "topic": "one_of_the_topics",
+            "selection_method": "improvement_or_struggle_or_random"
+        }}
+    """
+    difficulty_prompt = f"""
+        You are a function that returns ONLY valid JSON.
+
+        DO NOT include explanations, reasoning, code, markdown, symbols, or extra text.
+
+        TASK: Select a difficulty level for the next question based on the user's performance data, grade level, and recent question history.
+
+        INPUT:
+        Student Performance = {json_response}
+        Recent Question History = {recent_global}
+        Student Grade Level = {grade}
+
+        DIFFICULTY RULES:
+        Grade Level Impact:
+        Grade's 1-4 should primarily receive "easy" questions, with occasional "medium" questions for variety. Grades 5-6 can receive a mix of "easy" and "medium" questions, with rare "hard" questions. Grade 7+ can receive a balanced mix of "easy", "medium", and "hard" questions.
+        Accuracy Impact:
+        Performance should heavily influence difficulty selection. Randomness can be used OCCASIONALLY at higher grade levels to test the student's knowledge.
+        - accuracy < 40% → "easy"
+        - 40%–70% → "medium"
+        - > 70% → "hard"
+
+        RULES (CRITICAL):
+        - Use ONLY the provided performance data. NULL attempted_questions values indicate that the topic has not generated yet.
+        - Do NOT create, assume, or infer any missing values
+        - Do NOT fabricate tables, examples, or additional data
+        - Do NOT modify or reinterpret the input data
+        - If correct_questions OR attempted_questions is 0 or null → accuracy = 0
+        - If data is missing → accuracy = 0
+        - Do NOT explain your reasoning
+        - Do NOT output calculations
+        - Select a difficulty within the select grade level's capabilities. 
+        - Output ONLY JSON
+
+
+        OUTPUT FORMAT (STRICT):
+        Return ONLY this JSON. No extra text.
+
+        {{
             "difficulty": "easy_or_medium_or_hard"
         }}
     """
-    for attempt in range(3): 
-        llm_response = generate(
-            model = "llama3.1:8b",
-            prompt = prompt,
-            options={
-                    "temperature": 1.1, #more creativity
-                    "top_p": 0.95, #more diversity
-                    "top_k": 100 #broader token sampling.
-                }
-        )
 
-        raw = extract_json(llm_response.response)
-        if not raw:
+
+
+    for attempt in range(2): 
+        topic_response, difficulty_response = parallel_topic_and_difficulty_calculation(topic_prompt, difficulty_prompt)
+
+        raw_topic = extract_json(topic_response.response)
+        raw_difficulty = extract_json(difficulty_response.response)
+        if not raw_topic or not raw_difficulty:
             print(f"[Attempt {attempt+1}] No JSON found")
-            print(llm_response.response)
+            print(topic_response.response)
+            print(difficulty_response.response)
             continue
+        
 
         try:
-            topic_data = json.loads(raw)
+            topic_data = json.loads(raw_topic)
+            difficulty_data = json.loads(raw_difficulty)
         except Exception as e:
                 print(f"[Attempt {attempt+1}] JSON parse failed:", e)
-                print(llm_response.response)
+                print(topic_response.response)
+                print(difficulty_response.response)
                 continue
 
         # Validate required keys
-        required_keys = ["topic", "difficulty"]
-        if not all(k in topic_data for k in required_keys):
+        topic_required_keys = ["topic", "selection_method"]
+        difficulty_required_keys = ["difficulty"]
+        if not all(k in topic_data for k in topic_required_keys):
             print(f"[Attempt {attempt+1}] Missing keys:", topic_data)
+            continue
+
+        if not all(k in difficulty_data for k in difficulty_required_keys):
+            print(f"[Attempt {attempt+1}] Missing keys:", difficulty_data)
             continue
 
         # If we reach here → SUCCESS
@@ -182,13 +301,13 @@ def LLM_topic_decider(user_id, grade):
     if (topic_data):
         #WILL add check later to default to randomized selection if LLM topic selection fails. 
         topic = topic_data["topic"]
-        difficulty = topic_data["difficulty"]
+        difficulty = difficulty_data["difficulty"]
         
     else:
         print("LLM selection generation failed, fallback to randomized selection")
         topic,difficulty = randomize_selection(accuracy_response)
     
-   
+    print(f"Selected topic: {topic} (selection method: {topic_data.get('selection_method', 'N/A')}) at difficulty: {difficulty}")
     question = question_generation(topic, difficulty, user_id, grade)
     print(question)
 
@@ -203,10 +322,12 @@ def LLM_topic_decider(user_id, grade):
 #Theres probably a cleaner way to do this - have a list of topics and then loop through to find the right one, rather than hardcoding every option. But this works for now.
 def question_generation(topic, difficulty, user_id, grade):
     history = get_user_history(user_id)
+    recent_global = list(history["global"])[-5:]
+    recent_topic  = list(history[topic])[-5:] if topic in history else []
     print(f"topic: {topic} difficulty: {difficulty}")
     match topic:
         case "ordering":
-            response = LLM_ordering_generation.generate_ordering_question(history["global"], history["ordering"],
+            response = LLM_ordering_generation.generate_ordering_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -216,7 +337,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "topic": "ordering"}) 
 
         case "geometry":
-            response = LLM_geometry_generation.generate_geometry_question(history["global"], history["geometry"],
+            response = LLM_geometry_generation.generate_geometry_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -225,7 +346,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "geometry"})
         case "algebra":
-            response = LLM_algebra_generation.generate_algebra_question(history["global"], history["algebra"],
+            response = LLM_algebra_generation.generate_algebra_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -234,7 +355,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "algebra"})
         case "expressions":
-            response = LLM_expressions_generation.generate_expression_question(history["global"], history["expressions"],
+            response = LLM_expressions_generation.generate_expression_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -243,7 +364,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "expressions"})
         case "rationals":
-            response = LLM_rationals_generation.generate_rational_question(history["global"], history["rationals"],
+            response = LLM_rationals_generation.generate_rational_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -252,7 +373,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "rationals"})
         case "mean":
-            response = LLM_mean_generation.generate_mean_question(history["global"], history["mean"],
+            response = LLM_mean_generation.generate_mean_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -261,7 +382,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "mean"})
         case "median":
-            response = LLM_median_generation.generate_median_question(history["global"], history["median"],
+            response = LLM_median_generation.generate_median_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -270,7 +391,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "median"})
         case "mode":
-            response = LLM_mode_generation.generate_mode_question(history["global"], history["mode"],
+            response = LLM_mode_generation.generate_mode_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -279,7 +400,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "mode"})
         case "probability":
-            response = LLM_probability_generation.generate_probability_question(history["global"], history["probability"],
+            response = LLM_probability_generation.generate_probability_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],
@@ -288,7 +409,7 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "probability"})
         case "angle_relationships":
-            response = LLM_angle_relationship_generation.generate_angle_relationship_question(history["global"], history["angle_relationships"],
+            response = LLM_angle_relationship_generation.generate_angle_relationship_question(recent_global, recent_topic,
                 difficulty=difficulty, grade=grade)
             history["global"].append({
                     "text": response["question_text"],

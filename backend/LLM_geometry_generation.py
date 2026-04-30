@@ -130,6 +130,10 @@ IMPORTANT:
 - All numeric values must be simple (integers or one decimal max)
 - Ensure the problem is solvable using the provided variables
 
+EASY TOPICS: rectangle_area, rectangle_perimeter, triangle_area, triangle_perimeter, circle_area, circle_circumference
+MEDIUM TOPICS: rectangle_missing_side_area, rectangle_missing_side_perimeter, circle_missing_radius, pythagorean_theorem
+HARD TOPICS: rectangular_prism_volume, cylinder_volume, sphere_volume, cube_volume, pyramid_volume
+
 SCENARIO 1: rectangle_area
 Example:
 "A rectangle has a length of 5 units and a width of 3 units. What is its area?"
@@ -213,6 +217,8 @@ Example:
     "radius": "5"
   }}
 }}
+
+
 
 SCENARIO 7: rectangular_prism_volume
 Example:
