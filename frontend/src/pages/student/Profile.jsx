@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, Save } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { apiFetch } from '../../lib/api'
 import { toast } from 'sonner'
 
-const TABS = ['Overview', 'Preferences', 'Devices']
+const TABS  = ['Overview', 'Account', 'Preferences', 'Devices']
+const GRADES = ['1st Grade','2nd Grade','3rd Grade','4th Grade','5th Grade','6th Grade','7th Grade','8th Grade','Highschool','College']
 
 export default function Profile() {
   const { user, signOut } = useAuth()
@@ -13,7 +14,12 @@ export default function Profile() {
   const [stats, setStats]   = useState(null)
   const [sessions, setSessions] = useState([])
   const [copied, setCopied] = useState(false)
-  const [prefs, setPrefs]   = useState(() => {
+  const [profile, setProfile] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [editGrade, setEditGrade] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const [prefs, setPrefs] = useState(() => {
     const s = localStorage.getItem('al_prefs')
     return s ? JSON.parse(s) : { difficulty: 'adaptive', duration: '15', notifications: true }
   })
@@ -21,16 +27,36 @@ export default function Profile() {
   useEffect(() => {
     Promise.all([
       apiFetch('/api/stats/me').catch(() => null),
-      apiFetch('/api/sessions').catch(() => [])
-    ]).then(([s, sess]) => {
+      apiFetch('/api/sessions').catch(() => []),
+      apiFetch('/api/profile/me').catch(() => null),
+    ]).then(([s, sess, p]) => {
       setStats(s)
       setSessions(sess || [])
+      setProfile(p)
+      setEditName(p?.display_name || '')
+      setEditGrade(p?.grade_level || '')
     })
   }, [])
 
   const savePrefs = (updated) => {
     setPrefs(updated)
     localStorage.setItem('al_prefs', JSON.stringify(updated))
+  }
+
+  const saveProfile = async () => {
+    setSaving(true)
+    try {
+      const updated = await apiFetch('/api/profile/me', {
+        method: 'PUT',
+        body: { display_name: editName.trim() || null, grade_level: editGrade || null }
+      })
+      setProfile(updated)
+      toast.success('Profile saved')
+    } catch (e) {
+      toast.error(e.message || 'Could not save profile')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const copyId = () => {
@@ -41,7 +67,7 @@ export default function Profile() {
   }
 
   const acc      = stats?.total_questions > 0 ? Math.round((stats.total_correct / stats.total_questions) * 100) : 0
-  const initials = user?.email?.[0]?.toUpperCase() || '?'
+  const initials = (profile?.display_name || user?.email || '?')[0].toUpperCase()
   const joined   = user?.created_at ? new Date(user.created_at).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : 'Unknown'
 
   const Toggle = ({ value, onChange }) => (
@@ -66,16 +92,20 @@ export default function Profile() {
               {initials}
             </div>
             <h2 className="text-xl font-black">
-              {user?.user_metadata?.display_name || user?.email?.split('@')[0]}
+              {profile?.display_name || user?.email?.split('@')[0] || 'Student'}
             </h2>
             <p className="text-indigo-200 text-sm mt-1 break-all">{user?.email}</p>
+            {profile?.grade_level && (
+              <p className="mt-2 inline-block text-xs font-bold bg-white/20 px-2 py-1 rounded-full">
+                🎓 {profile.grade_level}
+              </p>
+            )}
 
             <div className="mt-4 bg-white/10 rounded-xl p-3">
               <p className="text-xs text-indigo-200 mb-0.5">Member since</p>
               <p className="font-bold text-sm">{joined}</p>
             </div>
 
-            {/* User ID box — parents need this to link */}
             <div className="mt-3 bg-white/10 rounded-xl p-3">
               <p className="text-xs text-indigo-200 mb-1">Your User ID</p>
               <p className="font-mono text-xs text-white break-all leading-relaxed">{user?.id}</p>
@@ -95,10 +125,10 @@ export default function Profile() {
 
         {/* tabs */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="lg:col-span-2 space-y-4">
-          <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+          <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 flex-wrap">
             {TABS.map(t => (
               <button key={t} onClick={() => setTab(t)}
-                className={`flex-1 py-2 text-sm font-bold rounded-lg transition ${tab === t ? 'bg-white dark:bg-gray-900 text-indigo-600 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}>
+                className={`flex-1 min-w-fit py-2 px-3 text-sm font-bold rounded-lg transition ${tab === t ? 'bg-white dark:bg-gray-900 text-indigo-600 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}>
                 {t}
               </button>
             ))}
@@ -106,12 +136,12 @@ export default function Profile() {
 
           <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
 
-            {/* ── OVERVIEW ── */}
+            {/* OVERVIEW */}
             {tab === 'Overview' && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Total Sessions',    value: sessions.length,              icon: '📋' },
+                    { label: 'Total Sessions',     value: sessions.length,             icon: '📋' },
                     { label: 'Questions Answered', value: stats?.total_questions ?? 0, icon: '📝' },
                     { label: 'Correct Answers',    value: stats?.total_correct ?? 0,   icon: '✅' },
                     { label: 'Best Streak',        value: stats?.best_streak ?? 0,     icon: '🔥' },
@@ -124,21 +154,14 @@ export default function Profile() {
                   ))}
                 </div>
 
-                {/* accuracy bar */}
                 <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-5 shadow-sm">
                   <div className="flex justify-between items-center mb-3">
                     <span className="text-sm font-bold text-gray-700 dark:text-gray-300">Overall Accuracy</span>
-                    <span className={`text-lg font-black ${acc >= 70 ? 'text-green-500' : acc >= 40 ? 'text-amber-500' : 'text-rose-500'}`}>
-                      {acc}%
-                    </span>
+                    <span className={`text-lg font-black ${acc >= 70 ? 'text-green-500' : acc >= 40 ? 'text-amber-500' : 'text-rose-500'}`}>{acc}%</span>
                   </div>
                   <div className="h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${acc}%` }}
-                      transition={{ duration: 0.8 }}
-                    />
+                    <motion.div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full"
+                      initial={{ width: 0 }} animate={{ width: `${acc}%` }} transition={{ duration: 0.8 }} />
                   </div>
                   <p className="text-xs text-gray-400 mt-2">
                     {acc >= 70 ? '🔥 Crushing it!' : acc >= 40 ? '👍 Solid work!' : '💪 Keep grinding!'}
@@ -147,7 +170,37 @@ export default function Profile() {
               </div>
             )}
 
-            {/* ── PREFERENCES ── */}
+            {/* ACCOUNT — name + grade */}
+            {tab === 'Account' && (
+              <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm space-y-5">
+                <h3 className="font-black text-gray-900 dark:text-white">Your Info</h3>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Display Name</label>
+                  <input value={editName} onChange={e => setEditName(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="What should we call you?" />
+                  <p className="text-[11px] text-gray-400 mt-1">This is what teachers and the leaderboard see.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Default Grade Level</label>
+                  <select value={editGrade} onChange={e => setEditGrade(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm dark:text-white outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">— not set —</option>
+                    {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">Used in Solo mode. Class mode uses the class's grade instead.</p>
+                </div>
+
+                <button onClick={saveProfile} disabled={saving}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm disabled:opacity-60 transition shadow">
+                  <Save size={15} /> {saving ? 'Saving…' : 'Save changes'}
+                </button>
+              </div>
+            )}
+
+            {/* PREFERENCES */}
             {tab === 'Preferences' && (
               <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm space-y-6">
                 <h3 className="font-black text-gray-900 dark:text-white">Learning Preferences</h3>
@@ -186,13 +239,11 @@ export default function Profile() {
               </div>
             )}
 
-            {/* ── DEVICES ── */}
+            {/* DEVICES */}
             {tab === 'Devices' && (
               <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm space-y-4">
                 <h3 className="font-black text-gray-900 dark:text-white">Device Integrations</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Connect cognitive monitoring devices for enhanced adaptive learning.
-                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Connect cognitive monitoring devices for enhanced adaptive learning.</p>
                 {[
                   { name: 'Muse Headband', desc: 'EEG signal monitoring — measures focus and stress in real time', icon: '🧠' },
                   { name: 'Webcam',        desc: 'Facial recognition — detects engagement and confusion',          icon: '📷' },
@@ -205,9 +256,7 @@ export default function Profile() {
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xs">{d.desc}</p>
                       </div>
                     </div>
-                    <button className="flex-shrink-0 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition">
-                      Connect
-                    </button>
+                    <button className="flex-shrink-0 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition">Connect</button>
                   </div>
                 ))}
               </div>

@@ -30,17 +30,16 @@ app.add_middleware(
 )
 
 
-# ─── helpers ──────────────────────────────────────────────────────────────────
+# ─── helpers ──────────────────────────────────────────────────────────────
 
 def get_user(request: Request):
     token = request.headers.get("authorization", "").replace("Bearer ", "").strip()
     if not token:
         raise HTTPException(401, "Missing token")
     resp = requests.get(f"{SUPABASE_URL}/auth/v1/user", headers={
-    "Authorization": f"Bearer {token}",
-    "apikey": SERVICE_ROLE_KEY
+        "Authorization": f"Bearer {token}",
+        "apikey": SERVICE_ROLE_KEY
     })
-    
     if resp.status_code != 200:
         raise HTTPException(401, "Invalid token")
     return resp.json()
@@ -48,8 +47,27 @@ def get_user(request: Request):
 def rand_code(n=6):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=n))
 
+def _profile(uid: str) -> dict:
+    """Source of truth: display_name / email / role / grade_level."""
+    try:
+        p = supabase.table("profiles").select("*").eq("id", uid).single().execute()
+        if p.data:
+            return p.data
+    except Exception:
+        pass
+    return {"id": uid, "display_name": "Student", "email": "", "role": "student", "grade_level": None}
 
-# ─── models ──────────────────────────────────��────────────────────────────────
+DIFFS = ["easy", "medium", "hard"]
+
+def _shift_difficulty(current: str | None, bias: int) -> str:
+    """bias: -1 easier, 0 keep, +1 harder. Clamped."""
+    if current not in DIFFS:
+        current = "medium"
+    idx = max(0, min(len(DIFFS) - 1, DIFFS.index(current) + (bias or 0)))
+    return DIFFS[idx]
+
+
+# ─── models ──────────────────────────────────────────────────────────────
 
 class StartSessionRequest(BaseModel):
     title: str | None = None
@@ -61,15 +79,51 @@ class AnswerPayload(BaseModel):
 
 class CreateClassRequest(BaseModel):
     name: str
+    grade_level: str | None = None
+
+class UpdateClassRequest(BaseModel):
+    name: str | None = None
+    grade_level: str | None = None
 
 class JoinClassRequest(BaseModel):
     join_code: str
 
 class LinkChildRequest(BaseModel):
-    child_id: str  # parent submits the kid's user_id
+    child_id: str
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str | None = None
+    grade_level:  str | None = None
 
 
-# ─── questions ────────────────────────────────────────────────────────────────
+# ─── profiles ────────────────────────────────────────────────────────────
+
+@app.get("/api/profile/me")
+def get_my_profile(request: Request):
+    user = get_user(request)
+    return _profile(user["id"])
+
+@app.put("/api/profile/me")
+def update_my_profile(payload: UpdateProfileRequest, request: Request):
+    user = get_user(request)
+    fields = {k: v for k, v in payload.dict().items() if v is not None}
+    if fields:
+        fields["updated_at"] = datetime.utcnow().isoformat()
+        supabase.table("profiles").update(fields).eq("id", user["id"]).execute()
+    # keep auth metadata in sync so legacy reads of user_metadata.display_name still work
+    if payload.display_name is not None:
+        try:
+            supabase.auth.admin.update_user_by_id(
+                user["id"],
+                {"user_metadata": {**(user.get("user_metadata") or {}),
+                                   "display_name": payload.display_name}},
+            )
+        except Exception as e:
+            print("metadata sync failed:", e)
+    return _profile(user["id"])
+
+
+# ─── questions ───────────────────────────────────────────────────────────
 
 @app.get("/api/questions")
 def get_questions(limit: int = 100, subject: str | None = None, difficulty: str | None = None):
@@ -80,18 +134,53 @@ def get_questions(limit: int = 100, subject: str | None = None, difficulty: str 
     return res.data or []
 
 
-# ─── llm generation ────────────────────────────────────────────────────────────────
-@app.get("/api/generate-question")
-def generate_question(user_id: str = Query(...), grade: str = Query(...)):
-    # question = LLM_topic_decider.LLM_topic_and_difficulty_separate_decider(user_id, grade)
-    question = LLM_topic_decider.LLM_single_prompt_topic_and_difficulty_decider(user_id, grade) #trying single prompt approach.
+# ─── llm generation ──────────────────────────────────────────────────────
 
+@app.get("/api/generate-question")
+def generate_question(
+    user_id:  str        = Query(...),
+    grade:    str | None = Query(None),
+    class_id: str | None = Query(None),
+    bias:     int        = Query(0),  # -1 easier, 0 auto, +1 harder
+):
+    """
+    If class_id is provided, the class's grade_level overrides `grade`.
+    `bias` shifts the LLM-picked difficulty by ±1 step.
+    """
+    effective_grade = grade or "5th Grade"
+    if class_id:
+        cls = supabase.table("classes").select("grade_level").eq("id", class_id).single().execute()
+        if cls.data and cls.data.get("grade_level"):
+            effective_grade = cls.data["grade_level"]
+
+    bias = max(-1, min(1, int(bias or 0)))
+
+    # 1) let the existing decider pick topic + difficulty + generate a question
+    question = LLM_topic_decider.LLM_topic_decider(user_id, effective_grade)
     if not question:
-        raise HTTPException(status_code=500, detail="Failed to generate question")
+        raise HTTPException(500, "Failed to generate question")
+
+    # 2) apply teacher/student bias by re-rolling the question at adjusted difficulty
+    if bias != 0:
+        topic        = question.get("question_topic")
+        cur_diff     = question.get("difficulty") or "medium"
+        target_diff  = _shift_difficulty(cur_diff, bias)
+        if topic and target_diff != cur_diff:
+            try:
+                question = LLM_topic_decider.question_generation(
+                    topic, target_diff, user_id, effective_grade
+                )
+                question["difficulty"] = target_diff
+            except Exception as e:
+                print("bias regeneration failed, returning original:", e)
+
+    # always echo back what was actually used
+    question["effective_grade"] = effective_grade
+    question["bias"] = bias
     return question
 
 
-# ─── sessions ─────────────────────────────────────────────────────────────────
+# ─── sessions ────────────────────────────────────────────────────────────
 
 @app.post("/api/sessions/start")
 def start_session(payload: StartSessionRequest, request: Request):
@@ -137,9 +226,8 @@ def end_session(session_id: str = Path(...), request: Request = None):
     supabase.table("sessions").update({"ended_at": datetime.utcnow().isoformat()}).eq("id", session_id).execute()
 
     total_q = data.get("questions_answered") or 0
-    correct  = data.get("correct_answers")   or 0
+    correct = data.get("correct_answers")    or 0
 
-    # upsert user_stats
     existing = supabase.table("user_stats").select("*").eq("user_id", user["id"]).execute()
     if existing.data:
         s = existing.data[0]
@@ -167,7 +255,7 @@ def list_sessions(request: Request):
     return res.data or []
 
 
-# ─── stats ────────────────────────────────────────────────────────────────────
+# ─── stats ───────────────────────────────────────────────────────────────
 
 @app.get("/api/stats/me")
 def my_stats(request: Request):
@@ -179,7 +267,6 @@ def my_stats(request: Request):
 
 @app.get("/api/stats/student/{student_id}")
 def student_stats(student_id: str, request: Request):
-    # parents and teachers can call this
     get_user(request)
     res = supabase.table("user_stats").select("*").eq("user_id", student_id).execute()
     if not res.data:
@@ -201,34 +288,23 @@ def student_performance(student_id: str, request: Request):
     return res.data or []
 
 
-# ─── leaderboard ─────────────────────────────────────────────────────────────
+# ─── leaderboard ─────────────────────────────────────────────────────────
 
 @app.get("/api/leaderboard")
 def leaderboard(request: Request, limit: int = 20):
     get_user(request)
-    # query user_stats joined with auth metadata via supabase admin
     res = supabase.table("user_stats") \
         .select("user_id, total_correct, total_questions, current_streak, best_streak") \
-        .order("total_correct", desc=True) \
-        .limit(limit) \
-        .execute()
+        .order("total_correct", desc=True).limit(limit).execute()
     rows = res.data or []
-    # fetch display names from auth.users via admin API
     enriched = []
     for i, row in enumerate(rows):
-        uid = row["user_id"]
-        try:
-            u = supabase.auth.admin.get_user_by_id(uid)
-            email    = u.user.email or ""
-            metadata = u.user.user_metadata or {}
-            name     = metadata.get("display_name") or email.split("@")[0]
-        except Exception:
-            name = "Unknown"
-        enriched.append({**row, "display_name": name, "rank": i + 1})
+        p = _profile(row["user_id"])
+        enriched.append({**row, "display_name": p.get("display_name") or "Student", "rank": i + 1})
     return enriched
 
 
-# ─── classes ─────────────────────────────────────────────────────────────────
+# ─── classes ────────────────────────────────────────────────────────────
 
 @app.post("/api/classes")
 def create_class(payload: CreateClassRequest, request: Request):
@@ -236,18 +312,32 @@ def create_class(payload: CreateClassRequest, request: Request):
     if user.get("user_metadata", {}).get("role") != "teacher":
         raise HTTPException(403, "Only teachers can create classes")
     code = rand_code()
-    # keep trying until unique
     for _ in range(5):
         existing = supabase.table("classes").select("id").eq("join_code", code).execute()
         if not existing.data:
             break
         code = rand_code()
     res = supabase.table("classes").insert({
-        "teacher_id": user["id"],
-        "name":       payload.name,
-        "join_code":  code,
+        "teacher_id":  user["id"],
+        "name":        payload.name,
+        "grade_level": payload.grade_level,
+        "join_code":   code,
     }).execute()
     return res.data[0]
+
+@app.put("/api/classes/{class_id}")
+def update_class(class_id: str, payload: UpdateClassRequest, request: Request):
+    user = get_user(request)
+    cls = supabase.table("classes").select("*").eq("id", class_id).single().execute()
+    if not cls.data:
+        raise HTTPException(404, "Class not found")
+    if cls.data["teacher_id"] != user["id"]:
+        raise HTTPException(403, "Not your class")
+    fields = {k: v for k, v in payload.dict().items() if v is not None}
+    if fields:
+        supabase.table("classes").update(fields).eq("id", class_id).execute()
+    res = supabase.table("classes").select("*").eq("id", class_id).single().execute()
+    return res.data
 
 @app.get("/api/classes")
 def my_classes(request: Request):
@@ -256,7 +346,6 @@ def my_classes(request: Request):
     if role == "teacher":
         res = supabase.table("classes").select("*, class_memberships(count)").eq("teacher_id", user["id"]).execute()
     else:
-        # return classes the student is in
         memberships = supabase.table("class_memberships").select("class_id").eq("student_id", user["id"]).execute()
         ids = [m["class_id"] for m in (memberships.data or [])]
         if not ids:
@@ -271,7 +360,6 @@ def join_class(payload: JoinClassRequest, request: Request):
     if not cls.data:
         raise HTTPException(404, "Class not found — check the code")
     class_id = cls.data[0]["id"]
-    # check not already joined
     already = supabase.table("class_memberships").select("id") \
         .eq("class_id", class_id).eq("student_id", user["id"]).execute()
     if already.data:
@@ -284,7 +372,7 @@ def join_class(payload: JoinClassRequest, request: Request):
 
 @app.get("/api/classes/{class_id}/students")
 def class_students(class_id: str, request: Request):
-    user = get_user(request)
+    get_user(request)
     memberships = supabase.table("class_memberships").select("student_id, joined_at") \
         .eq("class_id", class_id).execute()
     students = []
@@ -292,43 +380,147 @@ def class_students(class_id: str, request: Request):
         sid = m["student_id"]
         stats_res = supabase.table("user_stats").select("*").eq("user_id", sid).execute()
         stats = stats_res.data[0] if stats_res.data else {"total_questions": 0, "total_correct": 0, "current_streak": 0}
-        try:
-            u    = supabase.auth.admin.get_user_by_id(sid)
-            email = u.user.email or ""
-            meta  = u.user.user_metadata or {}
-            name  = meta.get("display_name") or email.split("@")[0]
-        except Exception:
-            name  = "Unknown"
-            email = ""
+        p = _profile(sid)
         students.append({
             "user_id":   sid,
-            "name":      name,
-            "email":     email,
+            "name":      p.get("display_name") or "Student",
+            "email":     p.get("email") or "",
             "joined_at": m["joined_at"],
             **stats,
         })
     return students
 
 
-# ─── parent endpoints ─────────────────────────────────────────────────────────
+# ─── biosignals: cognitive (headband) + face recognition ──────────────────
+
+class CognitiveSample(BaseModel):
+    ts:         str | None = None
+    focus:      float | None = None
+    stress:     float | None = None
+    engagement: float | None = None
+    alpha:      float | None = None
+    beta:       float | None = None
+    theta:      float | None = None
+    delta:      float | None = None
+    gamma:      float | None = None
+    raw:        dict  | None = None
+
+class CognitiveBatch(BaseModel):
+    session_id: str
+    samples:    list[CognitiveSample]
+
+class FaceSample(BaseModel):
+    ts:                  str | None = None
+    emotion:             str   | None = None
+    attention:           float | None = None
+    gaze_x:              float | None = None
+    gaze_y:              float | None = None
+    identity_confidence: float | None = None
+    raw:                 dict  | None = None
+
+class FaceBatch(BaseModel):
+    session_id: str
+    samples:    list[FaceSample]
+
+def _verify_session_owner(session_id: str, user_id: str):
+    sess = supabase.table("sessions").select("user_id").eq("id", session_id).single().execute()
+    if not sess.data:
+        raise HTTPException(404, "Session not found")
+    if sess.data["user_id"] != user_id:
+        raise HTTPException(403, "Not your session")
+
+@app.post("/api/signals/cognitive")
+def ingest_cognitive(payload: CognitiveBatch, request: Request):
+    user = get_user(request)
+    _verify_session_owner(payload.session_id, user["id"])
+    rows = [{
+        "session_id": payload.session_id,
+        "user_id":    user["id"],
+        "ts":         s.ts or datetime.utcnow().isoformat(),
+        "focus":      s.focus, "stress": s.stress, "engagement": s.engagement,
+        "alpha":      s.alpha, "beta":   s.beta,   "theta":      s.theta,
+        "delta":      s.delta, "gamma":  s.gamma,  "raw":        s.raw,
+    } for s in payload.samples]
+    if rows: supabase.table("cognitive_signals").insert(rows).execute()
+    return {"ok": True, "inserted": len(rows)}
+
+@app.post("/api/signals/face")
+def ingest_face(payload: FaceBatch, request: Request):
+    user = get_user(request)
+    _verify_session_owner(payload.session_id, user["id"])
+    rows = [{
+        "session_id":          payload.session_id,
+        "user_id":             user["id"],
+        "ts":                  s.ts or datetime.utcnow().isoformat(),
+        "emotion":             s.emotion,
+        "attention":           s.attention,
+        "gaze_x":              s.gaze_x,
+        "gaze_y":              s.gaze_y,
+        "identity_confidence": s.identity_confidence,
+        "raw":                 s.raw,
+    } for s in payload.samples]
+    if rows: supabase.table("face_signals").insert(rows).execute()
+    return {"ok": True, "inserted": len(rows)}
+
+@app.get("/api/signals/session/{session_id}")
+def session_signals(session_id: str, request: Request, since: str | None = None):
+    get_user(request)
+    cog = supabase.table("cognitive_signals").select("*").eq("session_id", session_id)
+    fac = supabase.table("face_signals").select("*").eq("session_id", session_id)
+    if since:
+        cog = cog.gt("ts", since); fac = fac.gt("ts", since)
+    cog_data = cog.order("ts").limit(20000).execute().data or []
+    fac_data = fac.order("ts").limit(20000).execute().data or []
+    answers  = supabase.table("session_answers").select("*").eq("session_id", session_id).order("answered_at").execute().data or []
+    return {"cognitive": cog_data, "face": fac_data, "answers": answers}
+
+@app.get("/api/teacher/classes/{class_id}/live")
+def class_live(class_id: str, request: Request):
+    user = get_user(request)
+    cls = supabase.table("classes").select("teacher_id").eq("id", class_id).single().execute()
+    if not cls.data:
+        raise HTTPException(404, "Class not found")
+    if cls.data["teacher_id"] != user["id"] and user.get("user_metadata", {}).get("role") != "teacher":
+        raise HTTPException(403, "Not your class")
+
+    members = supabase.table("class_memberships").select("student_id").eq("class_id", class_id).execute().data or []
+    out = []
+    for m in members:
+        sid = m["student_id"]
+        active = supabase.table("sessions").select("*") \
+            .eq("user_id", sid).is_("ended_at", "null") \
+            .order("started_at", desc=True).limit(1).execute().data
+        p = _profile(sid)
+        latest_cog = latest_face = None
+        if active:
+            session_id = active[0]["id"]
+            c = supabase.table("cognitive_signals").select("*") \
+                .eq("session_id", session_id).order("ts", desc=True).limit(1).execute().data
+            f = supabase.table("face_signals").select("*") \
+                .eq("session_id", session_id).order("ts", desc=True).limit(1).execute().data
+            latest_cog  = c[0] if c else None
+            latest_face = f[0] if f else None
+        out.append({
+            "user_id":          sid,
+            "name":             p.get("display_name") or "Student",
+            "email":            p.get("email") or "",
+            "active_session":   active[0] if active else None,
+            "latest_cognitive": latest_cog,
+            "latest_face":      latest_face,
+        })
+    return out
+
+
+# ─── parent endpoints ────────────────────────────────────────────────────
 
 @app.post("/api/parent/link-child")
 def link_child(payload: LinkChildRequest, request: Request):
     user = get_user(request)
     if user.get("user_metadata", {}).get("role") != "parent":
         raise HTTPException(403, "Only parents can link children")
-    # verify child exists
-    try:
-        child = supabase.auth.admin.get_user_by_id(payload.child_id)
-        if not child.user:
-            raise HTTPException(404, "Child account not found")
-        if child.user.user_metadata.get("role") != "student":
-            raise HTTPException(400, "That account is not a student")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(404, "Child account not found")
-    # check not already linked
+    p = _profile(payload.child_id)
+    if not p or p.get("role") != "student":
+        raise HTTPException(404, "Child account not found or not a student")
     already = supabase.table("parent_child_links").select("id") \
         .eq("parent_id", user["id"]).eq("child_id", payload.child_id).execute()
     if already.data:
@@ -337,7 +529,7 @@ def link_child(payload: LinkChildRequest, request: Request):
         "parent_id": user["id"],
         "child_id":  payload.child_id,
     }).execute()
-    return {"ok": True, "child_id": payload.child_id, "child_name": child.user.email.split("@")[0]}
+    return {"ok": True, "child_id": payload.child_id, "child_name": p.get("display_name") or "Student"}
 
 @app.get("/api/parent/children")
 def my_children(request: Request):
@@ -351,18 +543,11 @@ def my_children(request: Request):
         stats = stats_res.data[0] if stats_res.data else {"total_questions": 0, "total_correct": 0, "current_streak": 0, "best_streak": 0}
         sess_res = supabase.table("sessions").select("*").eq("user_id", cid).order("started_at", desc=True).limit(5).execute()
         perf_res = supabase.table("user_math_performance").select("*, math_topics(topic_name)").eq("user_id", cid).execute()
-        try:
-            u    = supabase.auth.admin.get_user_by_id(cid)
-            email = u.user.email or ""
-            meta  = u.user.user_metadata or {}
-            name  = meta.get("display_name") or email.split("@")[0]
-        except Exception:
-            name  = "Unknown"
-            email = ""
+        p = _profile(cid)
         children.append({
             "user_id":     cid,
-            "name":        name,
-            "email":       email,
+            "name":        p.get("display_name") or "Student",
+            "email":       p.get("email") or "",
             "linked_at":   lnk["created_at"],
             "stats":       stats,
             "sessions":    sess_res.data or [],

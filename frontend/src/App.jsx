@@ -27,6 +27,8 @@ import Questions        from './pages/teacher/Questions'
 import Analytics        from './pages/teacher/Analytics'
 import TeacherSettings  from './pages/teacher/Settings'
 import Classes          from './pages/teacher/Classes'
+import Live             from './pages/teacher/Live'
+import SessionReview    from './pages/teacher/SessionReview'
 
 import ParentDashboard  from './pages/parent/Dashboard'
 import ParentLinkChild  from './pages/parent/LinkChild'
@@ -61,12 +63,14 @@ export default function App() {
 
             {/* teacher */}
             <Route element={<RoleGuard roles={['teacher']}><TeacherLayout /></RoleGuard>}>
-              <Route path="/teacher"            element={<TeacherDashboard />} />
-              <Route path="/teacher/students"   element={<Students />} />
-              <Route path="/teacher/classes"    element={<Classes />} />
-              <Route path="/teacher/questions"  element={<Questions />} />
-              <Route path="/teacher/analytics"  element={<Analytics />} />
-              <Route path="/teacher/settings"   element={<TeacherSettings />} />
+              <Route path="/teacher"                  element={<TeacherDashboard />} />
+              <Route path="/teacher/live"             element={<Live />} />
+              <Route path="/teacher/sessions/:sessionId" element={<SessionReview />} />
+              <Route path="/teacher/students"         element={<Students />} />
+              <Route path="/teacher/classes"          element={<Classes />} />
+              <Route path="/teacher/questions"        element={<Questions />} />
+              <Route path="/teacher/analytics"        element={<Analytics />} />
+              <Route path="/teacher/settings"         element={<TeacherSettings />} />
             </Route>
 
             {/* parent */}
