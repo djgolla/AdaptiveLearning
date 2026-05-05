@@ -35,6 +35,17 @@ def extract_json(text):
 
     return None
 
+def serialize_sympy(x):
+    if isinstance(x, sp.Rational):
+        return str(x)          # "3/4"
+    if isinstance(x, sp.Integer):
+        return int(x)          # 5
+    if isinstance(x, sp.Float):
+        return float(x)
+    if isinstance(x, sp.Expr):
+        return str(x)          # "5*x", "3+4"
+    return str(x)
+
 def solve_probability(scenario, items, target):
     if (scenario == "probability_of"):
         solution = solve_probability_of(items, target)
@@ -220,7 +231,7 @@ def generate_probability_question(global_questions, prev_questions, difficulty, 
 
     solution = solve_probability(scenario, items, target)
 
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
 
     # for attempt in range(max_retries):
@@ -285,8 +296,9 @@ def generate_probability_question(global_questions, prev_questions, difficulty, 
     # incorrect_data = answer_data
     # answers = incorrect_data["incorrect_answers"] + [str(solution)]
    
-    incorrect_answers = inc_gen.generate_rational_incorrect_answers(solution) if solution is not None else []
-    answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
+    incorrect_answers = inc_gen.generate_incorrect_rational(solution) if solution is not None else []
+    solution = serialize_sympy(solution) if solution is not None else None
+    answers = [serialize_sympy(ans) for ans in incorrect_answers] + [solution]
 
     random.shuffle(answers)
 

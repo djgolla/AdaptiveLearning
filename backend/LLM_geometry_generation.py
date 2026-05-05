@@ -36,6 +36,32 @@ def extract_json(text):
 
 simple_pi = sympify(3.14)
 
+def normalize_solution(sol):
+    if isinstance(sol, list):
+        return sol[0]   # or pick valid one
+    return sol
+
+def serialize_sympy(x):
+    if isinstance(x, sp.Rational):
+        return str(x)          # "3/4"
+    if isinstance(x, sp.Integer):
+        return int(x)          # 5
+    if isinstance(x, sp.Float):
+        return float(x)
+    if isinstance(x, sp.Expr):
+        return str(x)          # "5*x", "3+4"
+    return str(x)
+
+def format_two_decimals(x):
+    if isinstance(x, list):
+        x = x[0]
+    val = float(x.evalf()) if hasattr(x, "evalf") else float(x)
+    # check if it's effectively an integer
+    if val.is_integer():
+        return str(int(val))   # "5"
+    else:
+        return f"{val:.2f}"    # "3.50"
+
 #Helpers
 def to_num(x):
     return sympify(x)
@@ -502,7 +528,7 @@ def generate_geometry_question(global_questions, prev_questions, difficulty, gra
         case "triangle_perimeter_missing_side" :
             solution = traingle_perimeter_missing_side(vars["perimeter"], vars["s1"], vars["s2"])
 
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
 
     # for attempt in range(max_retries):
@@ -568,9 +594,21 @@ def generate_geometry_question(global_questions, prev_questions, difficulty, gra
     # incorrect_data = answer_data
     # answers = incorrect_data["incorrect_answers"] + [str(solution)]
     
-    incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
-    answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
+    # incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
+    # solution = format_two_decimals(solution) if solution is not None else None
+    # solution = serialize_sympy(solution)
+    # answers = [serialize_sympy(ans) for ans in incorrect_answers] + [solution]
     
+    # normalize correct answer 
+    solution = normalize_solution(solution)
+    solution_float = float(solution)
+    solution = format_two_decimals(solution)
+    # generate incorrect answers using float
+    incorrect_answers = inc_gen.generate_general_incorrect_answers(solution_float)
+    # ensure everything is JSON-safe strings or floats
+    answers = [round(float(ans), 2) for ans in incorrect_answers] + [solution]
+
+
     random.shuffle(answers)
 
     #Build final JSON

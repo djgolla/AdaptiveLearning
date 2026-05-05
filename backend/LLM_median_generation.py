@@ -18,10 +18,14 @@ from sympy import symbols, Eq, solve, sympify, Integer
 import incorrect_solution_generation as inc_gen
 
 
-def to_native(value): 
-    if isinstance(value, Integer): 
-        return int(value) 
-    return value
+def format_number(x):
+    if isinstance(x, list):
+        x = x[0]
+    val = float(x.evalf()) if hasattr(x, "evalf") else float(sympify(x))
+    if abs(val - int(val)) < 1e-9:
+        return str(int(val))
+    return f"{val:.2f}"
+
 def extract_json(text):
     start = text.find("{")
     if start == -1:
@@ -176,7 +180,7 @@ def generate_median_question(global_questions, prev_questions,difficulty,grade, 
     solution = median(parts)
 
     #print("Solution:", solution)
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
     # for attempt in range(max_retries):
     #     incorrect_solution_prompt = f"""
@@ -238,8 +242,10 @@ def generate_median_question(global_questions, prev_questions,difficulty,grade, 
     # incorrect_data = answer_data
     # answers = incorrect_data["incorrect_answers"] + [str(solution)]
     
-    incorrect_answers = generate_incorrect_answers(solution, parts)
-    answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
+    solution_float = float(solution.evalf()) if hasattr(solution, "evalf") else float(solution)
+    incorrect_answers = generate_incorrect_answers(solution_float, parts)
+    solution = format_number(solution)
+    answers = [format_number(ans) for ans in incorrect_answers] + [solution]
 
 
     random.shuffle(answers)

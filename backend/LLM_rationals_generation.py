@@ -36,6 +36,16 @@ def extract_json(text):
 
     return None
 
+def serialize_sympy(obj):
+    if isinstance(obj, sp.Rational):
+        return str(obj)  # "3/4"
+    if isinstance(obj, sp.Integer):
+        return int(obj)
+    if isinstance(obj, sp.Float):
+        return float(obj)
+    if isinstance(obj, sp.Expr):
+        return str(obj)  # expressions like "5/2"
+    return str(obj)
 
 rat_prompt = f"""
 You are to provide a Math question suitable for students. The response must be in JSON format. 
@@ -131,7 +141,7 @@ def generate_rational_question(global_questions, prev_questions,difficulty, grad
     solution = sympify(equation_str)
 
     #print("Solution:", solution)
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
     # for attempt in range(max_retries):
     #     incorrect_solution_prompt = f"""
@@ -192,7 +202,9 @@ def generate_rational_question(global_questions, prev_questions,difficulty, grad
     # incorrect_data = answer_data
     # answers = incorrect_data["incorrect_answers"] + [str(solution)]
     
-    incorrect_answers = inc_gen.generate_rational_incorrect_answers(solution) if solution is not None else []
+    incorrect_answers = inc_gen.generate_incorrect_rational(solution) if solution is not None else []
+    solution = serialize_sympy(solution) if solution is not None else None
+    answers = [serialize_sympy(ans) for ans in incorrect_answers] + [solution]
 
     random.shuffle(answers)
 

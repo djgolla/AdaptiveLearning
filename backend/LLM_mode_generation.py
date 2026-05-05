@@ -20,11 +20,6 @@ from sympy import symbols, Eq, solve, sympify, Integer
 #POSSIBLY: manually generate solution using numbers from question_text.
 #This way I can count the # of modes present and ensure solution matches
 #that amount w/ randomly selected numbers. 
-
-def to_native(value): 
-    if isinstance(value, Integer): 
-        return int(value) 
-    return value
 def extract_json(text):
     start = text.find("{")
     if start == -1:
@@ -40,6 +35,13 @@ def extract_json(text):
                 return text[start:i+1]
 
     return None
+
+def serialize_answer(ans):
+    if isinstance(ans, list):
+        return [str(x) for x in ans]
+    if isinstance(ans, sp.Basic):
+        return str(ans)
+    return str(ans)
 
 mode_prompt = f"""
 You are to provide a Math question suitable for students. The response must be in JSON format. 
@@ -85,24 +87,48 @@ def mode(values):
 
 def generate_incorrect_answers(solution, values):
     generated_answers = []
-    #solution is one value, generate one value. 
-    if solution.length == 1:
+
+    # CASE 1: SINGLE MODE
+    if not isinstance(solution, list):
+        solution = str(solution)
+
         while len(generated_answers) < 3:
-            incorrect_answer = random.choice(values)
-            if str(incorrect_answer) != str(solution) and str(incorrect_answer) not in generated_answers:
-                generated_answers.append(str(incorrect_answer))
+            incorrect_answer = str(random.choice(values))
+
+            if (
+                incorrect_answer != solution and
+                incorrect_answer not in generated_answers
+            ):
+                generated_answers.append(incorrect_answer)
+
+    # CASE 2: MULTIPLE MODES
     else:
+        solution_set = set(map(str, solution))
+
         while len(generated_answers) < 3:
             generated = []
+            seen = set()
+
             while len(generated) < len(solution):
-                incorrect_answer = random.choice(values)
-                if (str(incorrect_answer) not in generated):
-                    generated.append(str(incorrect_answer))
-            if len(generated) == len(solution):
-                if generated not in generated_answers and generated != [str(s) for s in solution]:
-                    generated_answers.append(generated)
+                candidate = str(random.choice(values))
+
+                if candidate not in seen:
+                    seen.add(candidate)
+                    generated.append(candidate)
+
+            if (
+                set(generated) != solution_set and
+                generated not in generated_answers
+            ):
+                generated_answers.append(generated)
 
     return generated_answers
+
+def normalize_answer(ans):
+    #always return list
+    if isinstance(ans, list):
+        return [str(x) for x in ans]
+    return [str(ans)]
 
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
@@ -164,14 +190,10 @@ def generate_mode_question(global_questions, prev_questions,difficulty, grade, m
     parts = question_data['variables']
     solution = mode(parts)
 
-    if solution:
-        if len(solution) == 1:
-            solution = solution[0]   # unwrap single value
-        else:
-            solution = solution     # keep list for multiple modes
+    #solution = normalize_answer(solution_list)
 
     #print("Solution:", solution)
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
     # for attempt in range(max_retries):
     #     incorrect_solution_prompt = f"""
@@ -235,7 +257,8 @@ def generate_mode_question(global_questions, prev_questions,difficulty, grade, m
     # answers = incorrect_data["incorrect_answers"] + [str(solution)]
     
     incorrect_answers = generate_incorrect_answers(solution, parts)
-    answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
+    solution = serialize_answer(solution)
+    answers = [serialize_answer(ans) for ans in incorrect_answers] + [solution]
     
     random.shuffle(answers)
 

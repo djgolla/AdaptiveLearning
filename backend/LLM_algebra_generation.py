@@ -157,8 +157,11 @@ def generate_algebra_question(global_questions, prev_questions, difficulty, grad
     right_expr = parse_expr(right, transformations=transformations)
     equation = Eq(left_expr, right_expr) 
     solution = solve(equation, x) #solve for x
+
+
+
     #print("Solution:", solution)
-    solution = str(solution[0]) if solution else None
+    solution = str(solution[0]) if solution else None #solve returns a list, we want the first solution if it exists, otherwise None
 
     #
     # for attempt in range(max_retries):

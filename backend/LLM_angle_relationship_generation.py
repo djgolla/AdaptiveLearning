@@ -36,10 +36,29 @@ def extract_json(text):
 
     return None
 
-def to_native(value): 
-    if isinstance(value, Integer): 
-        return int(value) 
-    return value
+def normalize_solution(sol):
+    # sympy solve() often returns lists
+    if isinstance(sol, list):
+        sol = sol[0]
+
+    # sympy types → python scalar
+    if isinstance(sol, (sp.Integer, sp.Float)):
+        return float(sol)
+
+    if isinstance(sol, sp.Expr):
+        return float(sol.evalf())
+
+    return float(sol)
+
+def format_answer(x):
+    if x is None:
+        return None
+    x = float(x)
+    # check if it's basically an integer
+    if x.is_integer():
+        return str(int(x))
+    # otherwise keep decimals clean
+    return f"{round(x, 2)}"
 
 def preprocess_variables(vars):
     parsed = []
@@ -220,8 +239,9 @@ def generate_angle_relationship_question(global_questions,prev_questions, diffic
             solution = solve_complementary(vars[0], vars[1])
     
     
-    solution = to_native(solution)
-    solution = str(solution) if solution is not None else None
+    solution = normalize_solution(solution)
+    solution = format_answer(solution)
+    # solution = str(solution) if solution is not None else None
 
     # for attempt in range(max_retries):
     #     incorrect_solution_prompt = f"""
@@ -282,8 +302,8 @@ def generate_angle_relationship_question(global_questions,prev_questions, diffic
     # #combining generated incorrect responses with correct solution. 
     # incorrect_data = answer_data
     #answers = incorrect_data["incorrect_answers"] + [str(solution)]
-    
-    incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
+    solution_float = float(solution) if solution is not None else None
+    incorrect_answers = inc_gen.generate_general_incorrect_answers(solution_float) if solution_float is not None else []
     answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
     random.shuffle(answers)
 

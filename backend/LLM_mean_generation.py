@@ -17,6 +17,18 @@ import sympy as sp #pip install sympy
 from sympy import symbols, Eq, solve, sympify, Integer
 import incorrect_solution_generation as inc_gen
 
+def serialize_sympy(x):
+    if isinstance(x, sp.Rational):
+        return str(x)          # "3/4"
+    if isinstance(x, sp.Integer):
+        return int(x)          # 5
+    if isinstance(x, sp.Float):
+        return float(x)
+    if isinstance(x, sp.Expr):
+        return str(x)          # "5*x", "3+4"
+    return str(x)
+
+
 def to_native(value): 
     if isinstance(value, Integer): 
         return int(value) 
@@ -132,7 +144,7 @@ def generate_mean_question(global_questions,prev_questions,difficulty,grade,max_
     solution = sum(vals) / len(vals)
 
     #print("Solution:", solution)
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
     # for attempt in range(max_retries):
     #     incorrect_solution_prompt = f"""
@@ -196,7 +208,8 @@ def generate_mean_question(global_questions,prev_questions,difficulty,grade,max_
     # answers = incorrect_data["incorrect_answers"] + [str(solution)]
     
     incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
-    answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
+    solution = serialize_sympy(solution) if solution is not None else None
+    answers = [serialize_sympy(ans) for ans in incorrect_answers] + [solution]
     
     random.shuffle(answers)
 

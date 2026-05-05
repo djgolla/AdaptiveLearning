@@ -20,10 +20,18 @@ import incorrect_solution_generation as inc_gen
 # Enable implicit multiplication (2x → 2*x)
 transformations = (standard_transformations + (implicit_multiplication_application,))
 
-def to_native(value): 
-    if isinstance(value, Integer): 
-        return int(value) 
-    return value
+def is_numeric(expr):   
+    return len(expr.free_symbols) == 0
+
+def normalize_answer(val):
+    if isinstance(val, (sp.Integer, int)):
+        return int(val)
+    if isinstance(val, (sp.Float, float)):
+        return float(val)
+    if isinstance(val, sp.Rational):
+        return float(val)  
+    return str(val)
+
 def extract_json(text):
     start = text.find("{")
     if start == -1:
@@ -178,7 +186,7 @@ def generate_expression_question(global_questions, prev_questions, difficulty, g
             solution = sp.simplify(expr)
     
     #print("Solution:", solution)
-    solution = str(solution) if solution is not None else None
+    # solution = str(solution) if solution is not None else None
 
     # for attempt in range(max_retries):
 
@@ -254,7 +262,15 @@ def generate_expression_question(global_questions, prev_questions, difficulty, g
     # else:
     #     incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
     
-    incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
+    if scenario == "simplify":
+        incorrect_answers = inc_gen.generate_symbolic_incorrect_answers(solution)
+    else:
+        if is_numeric(solution):
+            incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution))
+        else:
+            incorrect_answers = []
+    
+    
     answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
     random.shuffle(answers)
 
@@ -263,7 +279,7 @@ def generate_expression_question(global_questions, prev_questions, difficulty, g
         "question_text": question_data["question_text"],
         "question_topic": "expressions",
         "answer_options": answers,
-        "correct_answer": solution
+        "correct_answer": str(normalize_answer(solution))
     }
 
 

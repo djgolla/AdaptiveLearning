@@ -7,6 +7,7 @@
 
 import random
 import sympy as sp 
+from sympy import symbols, Add, Mul
 from sympy.parsing.sympy_parser import (
     parse_expr,
     standard_transformations,
@@ -18,42 +19,44 @@ transformations = (standard_transformations + (implicit_multiplication_applicati
 #POSSIBLY - for method 1, find how many decimal places answer has and round to match. 
 
 #method 1
-def generate_general_incorrect_answers(answer): 
+def generate_general_incorrect_answers(answer):
     generated_answers = []
-    
+
+    # Always normalize to float for math
+    answer = float(sp.sympify(answer))    
     while len(generated_answers) < 3:
         operation = random.choice(["+", "-", "*"])
         if operation == "+":
-            low = random.randint(1, 10)
-            high = random.randint(11, 25)
-            incorrect_answer = answer + random.randint(low, high)
+            offset = random.randint(1, 25)
+            incorrect_answer = answer + offset
         elif operation == "-":
-            low = random.randint(1, 10)
-            high = random.randint(11, 25)
-            if (answer - high) < 0:
-                low = 1
-                high = answer
-            backup = random.randint(1, 5) #low val to ensure we dont get negatives. 
-            incorrect_answer = max(answer - random.randint(low, high), backup)
+            offset = random.randint(1, 25)
+            # prevent negative results
+            incorrect_answer = answer - offset
+            if incorrect_answer < 0:
+                incorrect_answer = random.randint(1, 5)
         elif operation == "*":
             factor = random.randint(2, 5)
             incorrect_answer = answer * factor
-        incorrect_answer = round(incorrect_answer, 2) #limit to 2 decimal places if needed.
-        sp.sympify(incorrect_answer) #ensure answer is in simplest form, also converts to fraction if needed.
-        
-        if incorrect_answer != answer and incorrect_answer not in generated_answers: #ensure we dont add the correct answer or duplicates.
-            generated_answers.append(incorrect_answer)
-        else:
-            continue 
-    return generated_answers
+        # round safely
+        incorrect_answer = round(float(incorrect_answer), 2)
 
-# #recieve input like 2x. not sure if needed or if can treat the same.
-# def generate_incorrect_simplied_answers(answer):
+        # normalize formatting (important for frontend equality checks)
+        formatted = f"{incorrect_answer:.2f}".rstrip('0').rstrip('.')
+
+        # compare numerically, store as string
+        if incorrect_answer != answer and formatted not in generated_answers:
+            generated_answers.append(formatted)
+
+    return generated_answers
 
 
 #maybe take numerator/denomiator as input. 
 def generate_incorrect_rational(answer): 
     generated_answers = []
+
+    answer = sp.sympify(answer)
+
     while len(generated_answers) < 3:
         num = random.randint(1, 20)
         denom = random.randint(1, 20)
@@ -71,8 +74,53 @@ def generate_incorrect_rational(answer):
         sp.sympify(incorrect_answer) #ensure answer is in simplest form
 
         if incorrect_answer != answer and incorrect_answer not in generated_answers: #ensure we dont add the correct answer or duplicates.
-            generated_answers.append(incorrect_answer)
+            generated_answers.append(str(incorrect_answer))
         else:
             continue 
 
     return generated_answers
+
+
+#expressions
+def extract_terms(expr):
+    """
+    Break expression into additive terms.
+    Example: 2*x + 3*x → [2*x, 3*x]
+    """
+    return list(expr.as_ordered_terms())
+
+def wrong_coefficient(expr):
+    x = symbols('x')
+
+    if expr.is_Add:
+        coeffs = [t.as_coeff_Mul()[0] for t in expr.as_ordered_terms()]
+        base = expr.as_ordered_terms()[0].as_coeff_Mul()[1]
+
+        wrong_coeff = sum(coeffs) + random.choice([-1, 1, 2])
+
+        return wrong_coeff * base
+
+    return expr
+
+def sign_error(expr):
+    return expr * -1
+
+def generate_symbolic_incorrect_answers(solution_expr, count=3):
+    results = set()
+
+    attempts = 0
+    while len(results) < count:
+        
+        
+        wrong = wrong_coefficient(solution_expr)
+
+        rand = random.random()
+        if rand < 0.5:
+            wrong = sign_error(wrong)
+
+        if wrong != solution_expr:
+            results.add(str(wrong))
+
+        attempts += 1
+
+    return list(results)
