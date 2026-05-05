@@ -83,7 +83,26 @@ def mode(values):
 
     return [key for key, value in count.items() if value == max_count]
 
+def generate_incorrect_answers(solution, values):
+    generated_answers = []
+    #solution is one value, generate one value. 
+    if solution.length == 1:
+        while len(generated_answers) < 3:
+            incorrect_answer = random.choice(values)
+            if str(incorrect_answer) != str(solution) and str(incorrect_answer) not in generated_answers:
+                generated_answers.append(str(incorrect_answer))
+    else:
+        while len(generated_answers) < 3:
+            generated = []
+            while len(generated) < len(solution):
+                incorrect_answer = random.choice(values)
+                if (str(incorrect_answer) not in generated):
+                    generated.append(str(incorrect_answer))
+            if len(generated) == len(solution):
+                if generated not in generated_answers and generated != [str(s) for s in solution]:
+                    generated_answers.append(generated)
 
+    return generated_answers
 
 #Potential improvements:
 #Maybe can store previously generated question, feed into LLM to ensure next question is not the same.
@@ -154,67 +173,70 @@ def generate_mode_question(global_questions, prev_questions,difficulty, grade, m
     #print("Solution:", solution)
     solution = str(solution) if solution else None
 
-    for attempt in range(max_retries):
-        incorrect_solution_prompt = f"""
-        Generate three incorrect numerical answer options for a math problem.
-        Question:
-        {question_data["question_text"]}
-        Correct Answer:
-        {solution}
+    # for attempt in range(max_retries):
+    #     incorrect_solution_prompt = f"""
+    #     Generate three incorrect numerical answer options for a math problem.
+    #     Question:
+    #     {question_data["question_text"]}
+    #     Correct Answer:
+    #     {solution}
 
-        Rules:
-        - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
-        - The answers must NOT equal or simplify to {solution}
-        - Unique, whole numbers numbers only. These numbers MUST come from the numeric values specified in the question that are not the solution.
-        - NUMBERS must be represented as strings. For example, "0.5" or "1/2" are valid representations.
-        - Only numbers or simple numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
-        - No fractions or expressions
-        - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
-        {{
-        "incorrect_answers": ["x","x","x"]
-        }}
-        """
+    #     Rules:
+    #     - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
+    #     - The answers must NOT equal or simplify to {solution}
+    #     - Unique, whole numbers numbers only. These numbers MUST come from the numeric values specified in the question that are not the solution.
+    #     - NUMBERS must be represented as strings. For example, "0.5" or "1/2" are valid representations.
+    #     - Only numbers or simple numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
+    #     - No fractions or expressions
+    #     - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
+    #     {{
+    #     "incorrect_answers": ["x","x","x"]
+    #     }}
+    #     """
 
-        if (solution != None):
-            answer_response = generate(model="llama3.1:8b",
-                                    prompt=incorrect_solution_prompt,
-                                    options = {"temperature": 0.4,
-                                                "top_p": 0.9,
-                                                "top_k": 40}) #slightly less randomness, 
-        if attempt > 0:
-            incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
+    #     if (solution != None):
+    #         answer_response = generate(model="llama3.1:8b",
+    #                                 prompt=incorrect_solution_prompt,
+    #                                 options = {"temperature": 0.4,
+    #                                             "top_p": 0.9,
+    #                                             "top_k": 40}) #slightly less randomness, 
+    #     if attempt > 0:
+    #         incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
 
-        raw = extract_json(answer_response.response)
+    #     raw = extract_json(answer_response.response)
 
-        if not raw:
-            print(f"[Attempt {attempt+1}] No JSON found")
-            print(answer_response.response)
-            continue
+    #     if not raw:
+    #         print(f"[Attempt {attempt+1}] No JSON found")
+    #         print(answer_response.response)
+    #         continue
 
-        try:
-            answer_data = json.loads(raw)
-        except Exception as e:
-            print(f"[Attempt {attempt+1}] JSON parse failed:", e)
-            print(answer_response.response)
-            continue
+    #     try:
+    #         answer_data = json.loads(raw)
+    #     except Exception as e:
+    #         print(f"[Attempt {attempt+1}] JSON parse failed:", e)
+    #         print(answer_response.response)
+    #         continue
 
-        # Validate required keys
-        required_keys = ["incorrect_answers"]
-        if not all(k in answer_data for k in required_keys):
-            print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
-            continue
+    #     # Validate required keys
+    #     required_keys = ["incorrect_answers"]
+    #     if not all(k in answer_data for k in required_keys):
+    #         print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
+    #         continue
 
-        # If we reach here → SUCCESS
-        break
+    #     # If we reach here → SUCCESS
+    #     break
 
-    else:
-        # All retries failed
-        raise ValueError("Failed to generate valid JSON after retries")
+    # else:
+    #     # All retries failed
+    #     raise ValueError("Failed to generate valid JSON after retries")
 
-    #combining generated incorrect responses with correct solution. 
-    incorrect_data = answer_data
-
-    answers = incorrect_data["incorrect_answers"] + [str(solution)]
+    # #combining generated incorrect responses with correct solution. 
+    # incorrect_data = answer_data
+    # answers = incorrect_data["incorrect_answers"] + [str(solution)]
+    
+    incorrect_answers = generate_incorrect_answers(solution, parts)
+    answers = [str(ans) for ans in incorrect_answers] + [str(solution)]
+    
     random.shuffle(answers)
 
     #Build final JSON

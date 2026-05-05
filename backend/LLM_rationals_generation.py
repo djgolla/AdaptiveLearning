@@ -17,6 +17,8 @@ from flask import Flask, jsonify
 from flask_cors import CORS #pip install flask-cors
 import sympy as sp #pip install sympy
 from sympy import symbols, Eq, solve, sympify, Integer, Rational
+import incorrect_solution_generation as inc_gen
+
 
 def extract_json(text):
     start = text.find("{")
@@ -131,65 +133,67 @@ def generate_rational_question(global_questions, prev_questions,difficulty, grad
     #print("Solution:", solution)
     solution = str(solution) if solution else None
 
-    for attempt in range(max_retries):
-        incorrect_solution_prompt = f"""
-        Generate three incorrect numerical answer options for a math problem.
-        Question:
-        {question_data["question_text"]}
-        Correct Answer:
-        {solution}
+    # for attempt in range(max_retries):
+    #     incorrect_solution_prompt = f"""
+    #     Generate three incorrect numerical answer options for a math problem.
+    #     Question:
+    #     {question_data["question_text"]}
+    #     Correct Answer:
+    #     {solution}
 
-        Rules:
-        - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
-        - The answers must NOT equal or simplify to {solution}
-        - Unique numbers only. NUMBERS must be represented as strings. For example, "0.5" or "1/2" are valid representations.
-        - Only rational numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
-        - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
-        {{
-        "incorrect_answers": ["x/y","x/y","x/y"]
-        }}
-        """
+    #     Rules:
+    #     - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
+    #     - The answers must NOT equal or simplify to {solution}
+    #     - Unique numbers only. NUMBERS must be represented as strings. For example, "0.5" or "1/2" are valid representations.
+    #     - Only rational numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
+    #     - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
+    #     {{
+    #     "incorrect_answers": ["x/y","x/y","x/y"]
+    #     }}
+    #     """
 
-        if (solution != None):
-            answer_response = generate(model="llama3.1:8b",
-                                    prompt=incorrect_solution_prompt,
-                                    options = {"temperature": 0.4,
-                                                "top_p": 0.9,
-                                                "top_k": 40}) #slightly less randomness,
-        if attempt > 0:
-            incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
+    #     if (solution != None):
+    #         answer_response = generate(model="llama3.1:8b",
+    #                                 prompt=incorrect_solution_prompt,
+    #                                 options = {"temperature": 0.4,
+    #                                             "top_p": 0.9,
+    #                                             "top_k": 40}) #slightly less randomness,
+    #     if attempt > 0:
+    #         incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
 
-        raw = extract_json(answer_response.response)
+    #     raw = extract_json(answer_response.response)
 
-        if not raw:
-            print(f"[Attempt {attempt+1}] No JSON found")
-            print(answer_response.response)
-            continue
+    #     if not raw:
+    #         print(f"[Attempt {attempt+1}] No JSON found")
+    #         print(answer_response.response)
+    #         continue
 
-        try:
-            answer_data = json.loads(raw)
-        except Exception as e:
-            print(f"[Attempt {attempt+1}] JSON parse failed:", e)
-            print(answer_response.response)
-            continue
+    #     try:
+    #         answer_data = json.loads(raw)
+    #     except Exception as e:
+    #         print(f"[Attempt {attempt+1}] JSON parse failed:", e)
+    #         print(answer_response.response)
+    #         continue
 
-        # Validate required keys
-        required_keys = ["incorrect_answers"]
-        if not all(k in answer_data for k in required_keys):
-            print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
-            continue
+    #     # Validate required keys
+    #     required_keys = ["incorrect_answers"]
+    #     if not all(k in answer_data for k in required_keys):
+    #         print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
+    #         continue
 
-        # If we reach here → SUCCESS
-        break
+    #     # If we reach here → SUCCESS
+    #     break
 
-    else:
-        # All retries failed
-        raise ValueError("Failed to generate valid JSON after retries") 
+    # else:
+    #     # All retries failed
+    #     raise ValueError("Failed to generate valid JSON after retries") 
 
-    #combining generated incorrect responses with correct solution. 
-    incorrect_data = answer_data
+    # #combining generated incorrect responses with correct solution. 
+    # incorrect_data = answer_data
+    # answers = incorrect_data["incorrect_answers"] + [str(solution)]
+    
+    incorrect_answers = inc_gen.generate_rational_incorrect_answers(solution) if solution is not None else []
 
-    answers = incorrect_data["incorrect_answers"] + [str(solution)]
     random.shuffle(answers)
 
     #Build final JSON

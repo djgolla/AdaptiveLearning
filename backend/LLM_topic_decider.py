@@ -156,7 +156,7 @@ def parallel_topic_and_difficulty_calculation(topic_prompt, difficulty_prompt):
 
 #PROBABLY: need to provide previous and current user performance data so LLM can see differences.  
 #Also should provide last topic selection? not sure since history should cover that. 
-def LLM_topic_decider(user_id, grade): 
+def LLM_topic_and_difficulty_separate_decider(user_id, grade): 
     accuracy_response = get_user_performance(user_id)
 
     json_response = accuracy_response.data or []
@@ -293,11 +293,6 @@ def LLM_topic_decider(user_id, grade):
         # If we reach here → SUCCESS
         break
 
-    # else:
-    #     # All retries failed
-    #     raise ValueError("(topic selection)Failed to generate valid JSON after retries")
-    
-
     if (topic_data):
         #WILL add check later to default to randomized selection if LLM topic selection fails. 
         topic = topic_data["topic"]
@@ -418,6 +413,108 @@ def question_generation(topic, difficulty, user_id, grade):
                     "text": response["question_text"],
                     "topic": "angle_relationships"})
     return response
+
+def LLM_single_prompt_topic_and_difficulty_decider(user_id, grade):
+    accuracy_response = get_user_performance(user_id)
+    
+    json_response = accuracy_response.data or []
+    
+    history = get_user_history(user_id)
+    recent_global = list(history["global"])[-5:]
+    
+    prompt = f"""
+            You are a function that returns ONLY valid JSON.
+    
+            DO NOT include explanations, reasoning, code, markdown, symbols, or extra text.
+    
+            INPUT:
+            Student Performance = {json_response}
+            Recent Question History = {recent_global}
+            Student Grade Level = {grade}
+    
+            TASK: Select a math topic and difficulty level for the next question based on the user's performance data, grade level, and recent question history.
+    
+            TOPICS:
+            geometry, algebra, expressions, ordering, rationals, mean, median, mode, probability, angle_relationships
+
+            TOPIC SELECTION GUIDANCE: 
+            Random variation should be used initially to introduce the user to a variety of topics. As the user accumulates performance data, focus selection on topics where the user has shown improvement or struggle. Struggle should be weighted more heavily than improvement. However, if a user continues to answer a "struggle" topic incorrectly, another topic should be selected for at least the next 5 topic selections.
+
+            DIFFICULTY LEVELS:
+            easy, medium, hard
+
+            DIFFICULTY SELECTION GUIDANCE:
+            Grade Level Impact:
+            Grade's 1-4 should primarily receive "easy" questions, with occasional "medium" questions for variety. Grades 5-6 can receive a mix of "easy" and "medium" questions, with rare "hard" questions. Grade 7+ can receive a balanced mix of "easy", "medium", and "hard" questions.
+            In general: 
+                If a student has an accuracy < 40% in a topic → "easy"
+                If a student has an accuracy between 40%–70% in a topic → "medium"
+                If a student has an accuracy > 70% in a topic → "hard"
+            However, randomness can be used OCCASIONALLY at higher grade levels to test the student's knowledge.
+
+            RULES (CRITICAL):
+            - Use ONLY the provided performance data. NULL attempted_questions values indicate that the topic has not generated yet.
+            - Do NOT create, assume, or infer any missing values
+            - Do NOT fabricate tables, examples, or additional data
+            - Do NOT modify or reinterpret the input data
+            - If correct_questions OR attempted_questions is 0 or null → accuracy = 0
+            - If data is missing → accuracy = 0
+            - Do NOT explain your reasoning
+            - Do NOT output calculations
+            - Output ONLY JSON
+    
+    
+            OUTPUT FORMAT (STRICT):
+            Return ONLY this JSON. No extra text.
+    
+            {{
+                "topic": "one_of_the_topics",
+                "difficulty": "easy_or_medium_or_hard"
+            }}
+        """
+    
+    for attempt in range(3):
+        response = generate(model="llama3.1:8b", prompt=prompt,
+            options={"temperature": 0.7, "top_p": 0.95, "top_k": 100})
+    
+        raw = extract_json(response.response)
+        if not raw:
+            print(f"[Attempt {attempt+1}] No JSON found")
+            print(response.response)
+            continue
+    
+        try:
+            topic_data = json.loads(raw)
+        except Exception as e:
+                print(f"[Attempt {attempt+1}] JSON parse failed:", e)
+                print(response.response)
+                continue
+    
+        # Validate required keys
+        required_keys = ["topic", "difficulty"]
+        if not all(k in topic_data for k in required_keys):
+            print(f"[Attempt {attempt+1}] Missing keys:", topic_data)
+            continue
+        # If we reach here → SUCCESS
+        break
+
+    if (topic_data):
+        topic = topic_data["topic"]
+        difficulty = topic_data["difficulty"]
+    else: #backup if generation failed. 
+        print("LLM selection generation failed, fallback to randomized selection")
+        topic,difficulty = randomize_selection(accuracy_response)
+    
+    question = question_generation(topic, difficulty, user_id, grade)
+    print(question)
+
+    if (add_question_to_supabase(question, difficulty)):
+        print("Question added to supabase successfully")
+
+    return question
+
+
+
 
 def randomize_selection(accuracy_response):
     num = random.randint(0, 9)
