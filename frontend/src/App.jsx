@@ -63,14 +63,14 @@ export default function App() {
 
             {/* teacher */}
             <Route element={<RoleGuard roles={['teacher']}><TeacherLayout /></RoleGuard>}>
-              <Route path="/teacher"                  element={<TeacherDashboard />} />
-              <Route path="/teacher/live"             element={<Live />} />
+              <Route path="/teacher"                     element={<TeacherDashboard />} />
+              <Route path="/teacher/live"                element={<Live />} />
               <Route path="/teacher/sessions/:sessionId" element={<SessionReview />} />
-              <Route path="/teacher/students"         element={<Students />} />
-              <Route path="/teacher/classes"          element={<Classes />} />
-              <Route path="/teacher/questions"        element={<Questions />} />
-              <Route path="/teacher/analytics"        element={<Analytics />} />
-              <Route path="/teacher/settings"         element={<TeacherSettings />} />
+              <Route path="/teacher/classes"             element={<Classes />} />
+              <Route path="/teacher/students"            element={<Students />} />
+              <Route path="/teacher/questions"           element={<Questions />} />
+              <Route path="/teacher/analytics"           element={<Analytics />} />
+              <Route path="/teacher/settings"            element={<TeacherSettings />} />
             </Route>
 
             {/* parent */}

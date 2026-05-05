@@ -476,6 +476,11 @@ def session_signals(session_id: str, request: Request, since: str | None = None)
 
 @app.get("/api/teacher/classes/{class_id}/live")
 def class_live(class_id: str, request: Request):
+    """
+    A student is shown as LIVE only if their session has activity within the last
+    LIVE_WINDOW_SEC seconds (a fresh signal sample or a fresh answer).
+    Stale sessions (no activity for STALE_AFTER_SEC) are auto-ended.
+    """
     user = get_user(request)
     cls = supabase.table("classes").select("teacher_id").eq("id", class_id).single().execute()
     if not cls.data:
@@ -483,28 +488,67 @@ def class_live(class_id: str, request: Request):
     if cls.data["teacher_id"] != user["id"] and user.get("user_metadata", {}).get("role") != "teacher":
         raise HTTPException(403, "Not your class")
 
+    from datetime import timedelta
+    LIVE_WINDOW_SEC  = 90
+    STALE_AFTER_SEC  = 600  # 10 min
+    now = datetime.utcnow()
+    live_cutoff  = (now - timedelta(seconds=LIVE_WINDOW_SEC)).isoformat()
+    stale_cutoff = (now - timedelta(seconds=STALE_AFTER_SEC)).isoformat()
+
     members = supabase.table("class_memberships").select("student_id").eq("class_id", class_id).execute().data or []
     out = []
     for m in members:
         sid = m["student_id"]
-        active = supabase.table("sessions").select("*") \
-            .eq("user_id", sid).is_("ended_at", "null") \
-            .order("started_at", desc=True).limit(1).execute().data
         p = _profile(sid)
+
+        # most recent open session for this student
+        open_sessions = supabase.table("sessions").select("*") \
+            .eq("user_id", sid).is_("ended_at", "null") \
+            .order("started_at", desc=True).limit(1).execute().data or []
+
+        active = None
         latest_cog = latest_face = None
-        if active:
-            session_id = active[0]["id"]
+
+        if open_sessions:
+            sess = open_sessions[0]
+            sid2 = sess["id"]
+
+            # latest signal samples for this session
             c = supabase.table("cognitive_signals").select("*") \
-                .eq("session_id", session_id).order("ts", desc=True).limit(1).execute().data
+                .eq("session_id", sid2).order("ts", desc=True).limit(1).execute().data
             f = supabase.table("face_signals").select("*") \
-                .eq("session_id", session_id).order("ts", desc=True).limit(1).execute().data
+                .eq("session_id", sid2).order("ts", desc=True).limit(1).execute().data
+            a = supabase.table("session_answers").select("answered_at") \
+                .eq("session_id", sid2).order("answered_at", desc=True).limit(1).execute().data
+
             latest_cog  = c[0] if c else None
             latest_face = f[0] if f else None
+
+            # most-recent activity timestamp
+            candidates = []
+            if latest_cog and latest_cog.get("ts"):       candidates.append(latest_cog["ts"])
+            if latest_face and latest_face.get("ts"):     candidates.append(latest_face["ts"])
+            if a and a[0].get("answered_at"):             candidates.append(a[0]["answered_at"])
+            if sess.get("started_at"):                    candidates.append(sess["started_at"])
+            last_activity = max(candidates) if candidates else sess.get("started_at")
+
+            # auto-end if stale, otherwise mark live only if within window
+            if last_activity and last_activity < stale_cutoff:
+                supabase.table("sessions").update({
+                    "ended_at": now.isoformat()
+                }).eq("id", sid2).execute()
+                # don't show as active anymore
+                active = None
+                latest_cog = None
+                latest_face = None
+            elif last_activity and last_activity >= live_cutoff:
+                active = sess
+
         out.append({
             "user_id":          sid,
             "name":             p.get("display_name") or "Student",
             "email":            p.get("email") or "",
-            "active_session":   active[0] if active else None,
+            "active_session":   active,
             "latest_cognitive": latest_cog,
             "latest_face":      latest_face,
         })
