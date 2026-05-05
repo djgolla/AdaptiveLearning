@@ -29,6 +29,7 @@ import TeacherSettings  from './pages/teacher/Settings'
 import Classes          from './pages/teacher/Classes'
 import Live             from './pages/teacher/Live'
 import SessionReview    from './pages/teacher/SessionReview'
+import Sessions         from './pages/teacher/Sessions'
 
 import ParentDashboard  from './pages/parent/Dashboard'
 import ParentLinkChild  from './pages/parent/LinkChild'
@@ -71,6 +72,7 @@ export default function App() {
               <Route path="/teacher/questions"           element={<Questions />} />
               <Route path="/teacher/analytics"           element={<Analytics />} />
               <Route path="/teacher/settings"            element={<TeacherSettings />} />
+              <Route path="/teacher/sessions"            element={<Sessions />} />
             </Route>
 
             {/* parent */}

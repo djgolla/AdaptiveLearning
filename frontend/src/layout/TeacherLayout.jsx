@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, HelpCircle, BarChart3,
   Settings, LogOut, Moon, Sun,
-  ChevronLeft, ChevronRight, Menu, X, Radio, BookOpen
+  ChevronLeft, ChevronRight, Menu, X, Radio, BookOpen, History
 } from 'lucide-react'
 import { useAuth }  from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
@@ -12,6 +12,7 @@ import { useTheme } from '../context/ThemeContext'
 const NAV = [
   { path: '/teacher',            label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { path: '/teacher/live',       label: 'Live',      icon: Radio },
+  { path: '/teacher/sessions',   label: 'Sessions',  icon: History },
   { path: '/teacher/classes',    label: 'Classes',   icon: BookOpen },
   { path: '/teacher/students',   label: 'Students',  icon: Users },
   { path: '/teacher/questions',  label: 'Questions', icon: HelpCircle },
