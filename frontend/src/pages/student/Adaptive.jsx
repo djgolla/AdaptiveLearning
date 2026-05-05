@@ -3,8 +3,8 @@ import { motion } from 'framer-motion'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { apiFetch } from '../../lib/api'
-import { createSignalRecorder } from '../../lib/signals'
-import { GraduationCap, User, Minus, Plus, Sparkles } from 'lucide-react'
+import { createSignalRecorder, eegHealth, eegStatus } from '../../lib/signals'
+import { GraduationCap, User, Minus, Plus, Sparkles, Brain } from 'lucide-react'
 
 const TOPICS = ['ordering','rationals','expressions','algebra','geometry','angle_relationships','mean','median','mode','probability']
 const ICONS  = { ordering:'🔢', rationals:'➗', expressions:'📐', algebra:'🔣', geometry:'📏', angle_relationships:'📐', mean:'〰️', median:'📊', mode:'🔁', probability:'🎲' }
@@ -39,6 +39,11 @@ export default function Adaptive() {
   const [sessionCount, setSessionCount] = useState(0)
   const [error, setError]           = useState(false)
 
+  // EEG headband state
+  const [recorder, setRecorder]   = useState(null)
+  const [sessionId, setSessionId] = useState(null)
+  const [headband, setHeadband]   = useState({ available: false, connected: false, samples: 0, lastTs: null })
+
   // load profile default grade + classes
   useEffect(() => {
     apiFetch('/api/profile/me').then(p => { if (p?.grade_level) setGrade(p.grade_level) }).catch(()=>{})
@@ -49,18 +54,42 @@ export default function Adaptive() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // recorder for biosignals
+  // start a session + check EEG service
   useEffect(() => {
-    let recorder
+    let r
     ;(async () => {
       try {
         const session = await apiFetch('/api/sessions/start', { method: 'POST', body: { title: 'Adaptive Session' } })
-        recorder = createSignalRecorder({ sessionId: session.id })
+        setSessionId(session.id)
+        r = createSignalRecorder({ sessionId: session.id })
+        setRecorder(r)
         window.AL_currentSessionId = session.id
+        const h = await eegHealth()
+        setHeadband(s => ({ ...s, available: !!h.available }))
       } catch {}
     })()
-    return () => { recorder?.stop() }
+    return () => { r?.stop() }
   }, [])
+
+  // poll EEG status while connected
+  useEffect(() => {
+    if (!sessionId) return
+    let killed = false
+    const tick = async () => {
+      const s = await eegStatus()
+      if (killed) return
+      setHeadband(prev => ({
+        ...prev,
+        available: !!s.service,
+        connected: !!s.poller?.running,
+        samples:   s.poller?.samples || 0,
+        lastTs:    s.poller?.last_ts || null,
+      }))
+    }
+    tick()
+    const id = setInterval(tick, 3000)
+    return () => { killed = true; clearInterval(id) }
+  }, [sessionId])
 
   useEffect(() => {
     if (!user?.id) return
@@ -68,6 +97,18 @@ export default function Adaptive() {
   }, [accuracyStats, user])
 
   useEffect(() => { localStorage.setItem('adaptive_mode', mode) }, [mode])
+
+  const toggleHeadband = async () => {
+    if (!recorder) return
+    if (headband.connected) {
+      await recorder.stop()
+      setHeadband(s => ({ ...s, connected: false }))
+    } else {
+      const res = await recorder.start()
+      if (res?.running) setHeadband(s => ({ ...s, connected: true }))
+      else alert(res?.error || 'Could not start headband. Is the EEG service running on :8001?')
+    }
+  }
 
   const sendAccuracyToBackend = async () => {
     const { data: topicRows, error: topicError } = await supabase.from('math_topics').select('id, topic_name')
@@ -137,9 +178,45 @@ export default function Adaptive() {
 
   return (
     <div className="p-6 lg:p-8 pb-12">
-      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-4">
         <h1 className="text-3xl font-black text-gray-900 dark:text-white">🧠 AI Adaptive Practice</h1>
         <p className="text-gray-500 dark:text-gray-400 mt-1">The AI picks your weakest topic and generates a custom question.</p>
+      </motion.div>
+
+      {/* HEADBAND PANEL */}
+      <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+        className="mb-4 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex items-center gap-3 flex-wrap">
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow ${
+          headband.connected
+            ? 'bg-gradient-to-br from-emerald-500 to-green-600 animate-pulse'
+            : headband.available
+              ? 'bg-gradient-to-br from-indigo-500 to-violet-600'
+              : 'bg-gradient-to-br from-gray-400 to-gray-500'
+        }`}>
+          <Brain size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2">
+            Muse Headband
+            {headband.connected && <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full">● STREAMING</span>}
+            {!headband.connected && headband.available && <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded-full">ready</span>}
+            {!headband.available && <span className="text-[10px] font-bold px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 rounded-full">offline</span>}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            {headband.connected
+              ? `${headband.samples} samples sent · teacher can see your focus & stress live`
+              : headband.available
+                ? 'EEG service detected on port 8001. Click connect to share live focus & stress with your teacher.'
+                : 'EEG service not reachable on port 8001. Make sure the EEGResearch backend is running.'}
+          </p>
+        </div>
+        <button onClick={toggleHeadband}
+          disabled={!headband.available || !sessionId}
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition shadow disabled:opacity-50 disabled:cursor-not-allowed ${
+            headband.connected ? 'bg-rose-500 hover:bg-rose-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+          }`}>
+          {headband.connected ? 'Disconnect' : 'Connect Headband'}
+        </button>
       </motion.div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -274,6 +351,11 @@ export default function Adaptive() {
                       <GraduationCap size={11} /> {data.effective_grade}
                     </span>
                   )}
+                  {headband.connected && (
+                    <span className="text-xs font-bold px-2.5 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full flex items-center gap-1">
+                      <Brain size={11} /> Live EEG
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-lg font-semibold text-gray-900 dark:text-white mb-6 leading-relaxed">{data.question_text}</p>
@@ -321,7 +403,6 @@ export default function Adaptive() {
                     <div className={`p-4 rounded-xl text-center font-black text-lg ${correct ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'}`}>
                       {correct ? '🎉 Correct! Great job!' : '❌ Not quite — keep going!'}
                     </div>
-                    {/* quick re-bias for next question */}
                     <div className="flex items-center justify-center gap-2">
                       <span className="text-xs text-gray-400">Next question:</span>
                       <button onClick={() => setBias(-1)} className={`text-xs px-3 py-1.5 rounded-lg font-bold border ${bias === -1 ? 'bg-emerald-500 text-white border-emerald-500' : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'}`}>Easier</button>

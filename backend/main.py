@@ -2,11 +2,13 @@ from fastapi import FastAPI, Request, HTTPException, Path, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os, requests, random, string
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 
 import LLM_topic_decider
+import eeg_client
+import eeg_poller
 
 load_dotenv()
 
@@ -48,7 +50,6 @@ def rand_code(n=6):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=n))
 
 def _profile(uid: str) -> dict:
-    """Source of truth: display_name / email / role / grade_level."""
     try:
         p = supabase.table("profiles").select("*").eq("id", uid).single().execute()
         if p.data:
@@ -60,7 +61,6 @@ def _profile(uid: str) -> dict:
 DIFFS = ["easy", "medium", "hard"]
 
 def _shift_difficulty(current: str | None, bias: int) -> str:
-    """bias: -1 easier, 0 keep, +1 harder. Clamped."""
     if current not in DIFFS:
         current = "medium"
     idx = max(0, min(len(DIFFS) - 1, DIFFS.index(current) + (bias or 0)))
@@ -95,6 +95,9 @@ class UpdateProfileRequest(BaseModel):
     display_name: str | None = None
     grade_level:  str | None = None
 
+class EegSessionRequest(BaseModel):
+    session_id: str
+
 
 # ─── profiles ────────────────────────────────────────────────────────────
 
@@ -110,7 +113,6 @@ def update_my_profile(payload: UpdateProfileRequest, request: Request):
     if fields:
         fields["updated_at"] = datetime.utcnow().isoformat()
         supabase.table("profiles").update(fields).eq("id", user["id"]).execute()
-    # keep auth metadata in sync so legacy reads of user_metadata.display_name still work
     if payload.display_name is not None:
         try:
             supabase.auth.admin.update_user_by_id(
@@ -141,12 +143,8 @@ def generate_question(
     user_id:  str        = Query(...),
     grade:    str | None = Query(None),
     class_id: str | None = Query(None),
-    bias:     int        = Query(0),  # -1 easier, 0 auto, +1 harder
+    bias:     int        = Query(0),
 ):
-    """
-    If class_id is provided, the class's grade_level overrides `grade`.
-    `bias` shifts the LLM-picked difficulty by ±1 step.
-    """
     effective_grade = grade or "5th Grade"
     if class_id:
         cls = supabase.table("classes").select("grade_level").eq("id", class_id).single().execute()
@@ -155,16 +153,14 @@ def generate_question(
 
     bias = max(-1, min(1, int(bias or 0)))
 
-    # 1) let the existing decider pick topic + difficulty + generate a question
-    question = LLM_topic_decider.LLM_topic_decider(user_id, effective_grade)
+    question = LLM_topic_decider.LLM_topic_and_difficulty_separate_decider(user_id, effective_grade)
     if not question:
         raise HTTPException(500, "Failed to generate question")
 
-    # 2) apply teacher/student bias by re-rolling the question at adjusted difficulty
     if bias != 0:
-        topic        = question.get("question_topic")
-        cur_diff     = question.get("difficulty") or "medium"
-        target_diff  = _shift_difficulty(cur_diff, bias)
+        topic       = question.get("question_topic")
+        cur_diff    = question.get("difficulty") or "medium"
+        target_diff = _shift_difficulty(cur_diff, bias)
         if topic and target_diff != cur_diff:
             try:
                 question = LLM_topic_decider.question_generation(
@@ -174,7 +170,6 @@ def generate_question(
             except Exception as e:
                 print("bias regeneration failed, returning original:", e)
 
-    # always echo back what was actually used
     question["effective_grade"] = effective_grade
     question["bias"] = bias
     return question
@@ -219,6 +214,7 @@ def record_answer(session_id: str = Path(...), payload: AnswerPayload = Body(...
 @app.post("/api/sessions/{session_id}/end")
 def end_session(session_id: str = Path(...), request: Request = None):
     user = get_user(request)
+    eeg_poller.stop(session_id)  # auto-stop EEG poller
     sess = supabase.table("sessions").select("*").eq("id", session_id).single().execute()
     if not sess.data:
         raise HTTPException(404, "Session not found")
@@ -474,13 +470,11 @@ def session_signals(session_id: str, request: Request, since: str | None = None)
     answers  = supabase.table("session_answers").select("*").eq("session_id", session_id).order("answered_at").execute().data or []
     return {"cognitive": cog_data, "face": fac_data, "answers": answers}
 
+
+# ─── live monitoring (only show truly active sessions) ───────────────────
+
 @app.get("/api/teacher/classes/{class_id}/live")
 def class_live(class_id: str, request: Request):
-    """
-    A student is shown as LIVE only if their session has activity within the last
-    LIVE_WINDOW_SEC seconds (a fresh signal sample or a fresh answer).
-    Stale sessions (no activity for STALE_AFTER_SEC) are auto-ended.
-    """
     user = get_user(request)
     cls = supabase.table("classes").select("teacher_id").eq("id", class_id).single().execute()
     if not cls.data:
@@ -488,9 +482,8 @@ def class_live(class_id: str, request: Request):
     if cls.data["teacher_id"] != user["id"] and user.get("user_metadata", {}).get("role") != "teacher":
         raise HTTPException(403, "Not your class")
 
-    from datetime import timedelta
-    LIVE_WINDOW_SEC  = 90
-    STALE_AFTER_SEC  = 600  # 10 min
+    LIVE_WINDOW_SEC = 90
+    STALE_AFTER_SEC = 600
     now = datetime.utcnow()
     live_cutoff  = (now - timedelta(seconds=LIVE_WINDOW_SEC)).isoformat()
     stale_cutoff = (now - timedelta(seconds=STALE_AFTER_SEC)).isoformat()
@@ -501,7 +494,6 @@ def class_live(class_id: str, request: Request):
         sid = m["student_id"]
         p = _profile(sid)
 
-        # most recent open session for this student
         open_sessions = supabase.table("sessions").select("*") \
             .eq("user_id", sid).is_("ended_at", "null") \
             .order("started_at", desc=True).limit(1).execute().data or []
@@ -512,8 +504,6 @@ def class_live(class_id: str, request: Request):
         if open_sessions:
             sess = open_sessions[0]
             sid2 = sess["id"]
-
-            # latest signal samples for this session
             c = supabase.table("cognitive_signals").select("*") \
                 .eq("session_id", sid2).order("ts", desc=True).limit(1).execute().data
             f = supabase.table("face_signals").select("*") \
@@ -524,7 +514,6 @@ def class_live(class_id: str, request: Request):
             latest_cog  = c[0] if c else None
             latest_face = f[0] if f else None
 
-            # most-recent activity timestamp
             candidates = []
             if latest_cog and latest_cog.get("ts"):       candidates.append(latest_cog["ts"])
             if latest_face and latest_face.get("ts"):     candidates.append(latest_face["ts"])
@@ -532,15 +521,12 @@ def class_live(class_id: str, request: Request):
             if sess.get("started_at"):                    candidates.append(sess["started_at"])
             last_activity = max(candidates) if candidates else sess.get("started_at")
 
-            # auto-end if stale, otherwise mark live only if within window
             if last_activity and last_activity < stale_cutoff:
                 supabase.table("sessions").update({
                     "ended_at": now.isoformat()
                 }).eq("id", sid2).execute()
-                # don't show as active anymore
-                active = None
-                latest_cog = None
-                latest_face = None
+                eeg_poller.stop(sid2)
+                active = None; latest_cog = None; latest_face = None
             elif last_activity and last_activity >= live_cutoff:
                 active = sess
 
@@ -553,6 +539,52 @@ def class_live(class_id: str, request: Request):
             "latest_face":      latest_face,
         })
     return out
+
+
+# ─── EEG sidecar integration ─────────────────────────���───────────────────
+
+@app.get("/api/eeg/health")
+def eeg_health():
+    """Tells the frontend whether the EEGResearch sidecar service is reachable."""
+    alive = eeg_client.is_alive()
+    if not alive:
+        return {"available": False, "url": eeg_client.EEG_API_URL}
+    return {"available": True, "url": eeg_client.EEG_API_URL,
+            "muse": eeg_client.get_muse_status()}
+
+@app.post("/api/eeg/start")
+def eeg_start(payload: EegSessionRequest, request: Request):
+    user = get_user(request)
+    sess = supabase.table("sessions").select("user_id, ended_at") \
+        .eq("id", payload.session_id).single().execute()
+    if not sess.data:
+        raise HTTPException(404, "Session not found")
+    if sess.data["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your session")
+    if sess.data.get("ended_at"):
+        raise HTTPException(400, "Session already ended")
+    if not eeg_client.is_alive():
+        raise HTTPException(503, "EEG service is not running on port 8001")
+    out = eeg_poller.start(supabase, user["id"], payload.session_id)
+    return {"ok": True, **out}
+
+@app.post("/api/eeg/stop")
+def eeg_stop(payload: EegSessionRequest, request: Request):
+    user = get_user(request)
+    sess = supabase.table("sessions").select("user_id") \
+        .eq("id", payload.session_id).single().execute()
+    if not sess.data or sess.data["user_id"] != user["id"]:
+        raise HTTPException(403, "Not your session")
+    return {"ok": True, **eeg_poller.stop(payload.session_id)}
+
+@app.get("/api/eeg/status")
+def eeg_status(request: Request):
+    user = get_user(request)
+    return {
+        "service": eeg_client.is_alive(),
+        "muse":    eeg_client.get_muse_status(),
+        "poller":  eeg_poller.status(user["id"]),
+    }
 
 
 # ─── parent endpoints ────────────────────────────────────────────────────
