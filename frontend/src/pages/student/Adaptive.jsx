@@ -99,14 +99,25 @@ export default function Adaptive() {
   useEffect(() => { localStorage.setItem('adaptive_mode', mode) }, [mode])
 
   const toggleHeadband = async () => {
-    if (!recorder) return
+    console.log('[headband] toggle clicked', { recorder: !!recorder, sessionId, headband })
+    if (!recorder) {
+      alert('No recorder yet — sessionId might still be loading. Wait 2s and retry.')
+      return
+    }
+    if (!sessionId) {
+      alert('No sessionId — the practice session never started. Refresh the page.')
+      return
+    }
     if (headband.connected) {
+      console.log('[headband] stopping')
       await recorder.stop()
       setHeadband(s => ({ ...s, connected: false }))
     } else {
+      console.log('[headband] starting…')
       const res = await recorder.start()
+      console.log('[headband] start result:', res)
       if (res?.running) setHeadband(s => ({ ...s, connected: true }))
-      else alert(res?.error || 'Could not start headband. Is the EEG service running on :8001?')
+      else alert('Could not start headband: ' + JSON.stringify(res))
     }
   }
 
