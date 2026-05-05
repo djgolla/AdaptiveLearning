@@ -15,6 +15,19 @@ from flask import Flask, jsonify
 from flask_cors import CORS #pip install flask-cors
 import sympy as sp #pip install sympy
 from sympy import symbols, Eq, solve, sympify, Integer
+import incorrect_solution_generation as inc_gen
+
+def serialize_sympy(x):
+    if isinstance(x, sp.Rational):
+        return str(x)          # "3/4"
+    if isinstance(x, sp.Integer):
+        return int(x)          # 5
+    if isinstance(x, sp.Float):
+        return float(x)
+    if isinstance(x, sp.Expr):
+        return str(x)          # "5*x", "3+4"
+    return str(x)
+
 
 def to_native(value): 
     if isinstance(value, Integer): 
@@ -35,6 +48,7 @@ def extract_json(text):
                 return text[start:i+1]
 
     return None
+
 
 #Currently only using integers, possibly try to include decimals/rationals in future
 
@@ -130,68 +144,73 @@ def generate_mean_question(global_questions,prev_questions,difficulty,grade,max_
     solution = sum(vals) / len(vals)
 
     #print("Solution:", solution)
-    solution = str(solution) if solution else None
+    # solution = str(solution) if solution else None
 
-    for attempt in range(max_retries):
-        incorrect_solution_prompt = f"""
-        Generate three incorrect numerical answer options for a math problem.
-        Question:
-        {question_data["question_text"]}
-        Correct Answer:
-        {solution}
+    # for attempt in range(max_retries):
+    #     incorrect_solution_prompt = f"""
+    #     Generate three incorrect numerical answer options for a math problem.
+    #     Question:
+    #     {question_data["question_text"]}
+    #     Correct Answer:
+    #     {solution}
 
-        Rules:
-        - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
-        - The answers must NOT equal or simplify to {solution}
-        - Unique whole numbers only. NUMBERS must be represented as strings. 
-        - Only numbers or simple numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
-        - No fractions or expressions
-        - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
-        {{
-        "incorrect_answers": ["x","x","x"]
-        }}
-        """
+    #     Rules:
+    #     - NO additional text, characters, or symbols should accompany this response. Response should strictly include JSON formatted data.
+    #     - The answers must NOT equal or simplify to {solution}
+    #     - Unique whole numbers only. NUMBERS must be represented as strings. 
+    #     - Only numbers or simple numeric strings are allowed. Do NOT use brackets, fractions, or expressions.
+    #     - No fractions or expressions
+    #     - Return JSON format: each array value of incorrect_answers should be a separate incorrect answer
+    #     {{
+    #     "incorrect_answers": ["x","x","x"]
+    #     }}
+    #     """
 
-        if (solution != None):
-            answer_response = generate(model="llama3.1:8b",
-                                    prompt=incorrect_solution_prompt,
-                                    options = {"temperature": 0.4,
-                                                "top_p": 0.9,
-                                                "top_k": 40}) #slightly less randomness, 
-        if attempt > 0:
-            incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
+    #     if (solution != None):
+    #         answer_response = generate(model="llama3.1:8b",
+    #                                 prompt=incorrect_solution_prompt,
+    #                                 options = {"temperature": 0.4,
+    #                                             "top_p": 0.9,
+    #                                             "top_k": 40}) #slightly less randomness, 
+    #     if attempt > 0:
+    #         incorrect_solution_prompt += "\nREMEMBER: ONLY RETURN VALID JSON. NO EXTRA TEXT."
             
-        raw = extract_json(answer_response.response)
+    #     raw = extract_json(answer_response.response)
 
-        if not raw:
-            print(f"[Attempt {attempt+1}] No JSON found")
-            print(answer_response.response)
-            continue
+    #     if not raw:
+    #         print(f"[Attempt {attempt+1}] No JSON found")
+    #         print(answer_response.response)
+    #         continue
 
-        try:
-            answer_data = json.loads(raw)
-        except Exception as e:
-            print(f"[Attempt {attempt+1}] JSON parse failed:", e)
-            print(answer_response.response)
-            continue
+    #     try:
+    #         answer_data = json.loads(raw)
+    #     except Exception as e:
+    #         print(f"[Attempt {attempt+1}] JSON parse failed:", e)
+    #         print(answer_response.response)
+    #         continue
 
-        # Validate required keys
-        required_keys = ["incorrect_answers"]
-        if not all(k in answer_data for k in required_keys):
-            print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
-            continue
+    #     # Validate required keys
+    #     required_keys = ["incorrect_answers"]
+    #     if not all(k in answer_data for k in required_keys):
+    #         print(f"[Attempt {attempt+1}] Missing keys:", answer_data)
+    #         continue
 
-        # If we reach here → SUCCESS
-        break
+    #     # If we reach here → SUCCESS
+    #     break
 
-    else:
-        # All retries failed
-        raise ValueError("Failed to generate valid JSON after retries")
+    # else:
+    #     # All retries failed
+    #     raise ValueError("Failed to generate valid JSON after retries")
 
-    #combining generated incorrect responses with correct solution. 
-    incorrect_data = answer_data
+    # #combining generated incorrect responses with correct solution. 
+    # incorrect_data = answer_data
 
-    answers = incorrect_data["incorrect_answers"] + [str(solution)]
+    # answers = incorrect_data["incorrect_answers"] + [str(solution)]
+    
+    incorrect_answers = inc_gen.generate_general_incorrect_answers(float(solution)) if solution is not None else []
+    solution = serialize_sympy(solution) if solution is not None else None
+    answers = [serialize_sympy(ans) for ans in incorrect_answers] + [solution]
+    
     random.shuffle(answers)
 
     #Build final JSON

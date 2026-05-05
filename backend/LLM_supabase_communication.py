@@ -8,6 +8,8 @@ from flask import Flask, jsonify,request
 from flask_cors import CORS #pip install flask-cors
 #python -m flask --app LLM_supabase_communication run
 
+#CURRENTLY NOT IN USE IN APPLICATION
+
 #Setup Flask app and enable CORS to communicate with React frontend
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:5173"])

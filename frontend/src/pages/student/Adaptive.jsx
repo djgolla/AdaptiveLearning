@@ -16,8 +16,12 @@ const initSubjects = () => {
 export default function Adaptive() {
   const { user } = useAuth()
 
+
   const [accuracyStats, setAccuracyStats] = useState(() => {
-    const saved = localStorage.getItem('accuracyStats')
+    if (!user?.id) {
+      return { total: { correct: 0, attempts: 0 }, subjects: initSubjects() }
+    }
+    const saved = localStorage.getItem(`accuracyStats_${user.id}`)
     if (saved) return JSON.parse(saved)
     return { total: { correct: 0, attempts: 0 }, subjects: initSubjects() }
   })
@@ -32,8 +36,9 @@ export default function Adaptive() {
   const [grade, setGrade]           = useState('1st Grade')
 
   useEffect(() => {
-    localStorage.setItem('accuracyStats', JSON.stringify(accuracyStats))
-  }, [accuracyStats])
+    if (!user?.id) return
+    localStorage.setItem(`accuracyStats_${user.id}`, JSON.stringify(accuracyStats))
+  }, [accuracyStats, user])
 
   const sendAccuracyToBackend = async () => {
     const { data: topicRows, error: topicError } = await supabase.from('math_topics').select('id, topic_name')
@@ -295,7 +300,7 @@ export default function Adaptive() {
               onClick={() => {
                 setAccuracyStats({ total: { correct: 0, attempts: 0 }, subjects: initSubjects() })
                 setSessionCount(0)
-                localStorage.removeItem('accuracyStats')
+                localStorage.removeItem(`accuracyStats_${user.id}`)
               }}
               className="mt-5 w-full text-xs text-gray-400 hover:text-rose-500 transition py-2"
             >
