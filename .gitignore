@@ -25,3 +25,20 @@ dist-ssr
 *.sw?
 
 
+# Ignore virtual environment directories and cache files
+!/.venv
+/.venv
+.venv39
+!/venv39
+venv39
+.venv
+
+# Ignore Python cache directories
+!/__pycache__
+/__pycache__
+__pycache__
+!/__pycache__
+*.pyc
+#ignore saved frames
+frames/*
+

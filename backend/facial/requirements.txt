@@ -1,0 +1,10 @@
+#Python 3.9
+# Core scientific stack
+numpy
+matplotlib
+
+# Computer vision
+opencv-python
+
+# Facial emotion/action-unit detection (imported as `feat`)
+py-feat

@@ -15,6 +15,8 @@ load_dotenv()
 SUPABASE_URL     = os.getenv("SUPABASE_URL")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 BACKEND_PORT     = int(os.getenv("BACKEND_PORT", "8000"))
+FACIAL_API_URL   = os.getenv("FACIAL_API_URL", "http://127.0.0.1:8002").rstrip("/")
+FACIAL_TIMEOUT   = float(os.getenv("FACIAL_API_TIMEOUT", "3"))
 
 if not SUPABASE_URL or not SERVICE_ROLE_KEY:
     raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
@@ -425,6 +427,36 @@ def _verify_session_owner(session_id: str, user_id: str):
     if sess.data["user_id"] != user_id:
         raise HTTPException(403, "Not your session")
 
+
+def _facial_get(path: str):
+    url = f"{FACIAL_API_URL}{path}"
+    try:
+        r = requests.get(url, timeout=FACIAL_TIMEOUT)
+    except Exception as e:
+        raise HTTPException(503, f"Facial service unavailable: {e}")
+    try:
+        data = r.json()
+    except Exception:
+        data = {"ok": False, "error": r.text or "Invalid facial service response"}
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, data.get("error") or data.get("message") or "Facial service error")
+    return data
+
+
+def _facial_post(path: str, payload: dict | None = None):
+    url = f"{FACIAL_API_URL}{path}"
+    try:
+        r = requests.post(url, json=payload or {}, timeout=FACIAL_TIMEOUT)
+    except Exception as e:
+        raise HTTPException(503, f"Facial service unavailable: {e}")
+    try:
+        data = r.json()
+    except Exception:
+        data = {"ok": False, "error": r.text or "Invalid facial service response"}
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, data.get("error") or data.get("message") or "Facial service error")
+    return data
+
 @app.post("/api/signals/cognitive")
 def ingest_cognitive(payload: CognitiveBatch, request: Request):
     user = get_user(request)
@@ -469,6 +501,38 @@ def session_signals(session_id: str, request: Request, since: str | None = None)
     fac_data = fac.order("ts").limit(20000).execute().data or []
     answers  = supabase.table("session_answers").select("*").eq("session_id", session_id).order("answered_at").execute().data or []
     return {"cognitive": cog_data, "face": fac_data, "answers": answers}
+
+
+@app.get("/api/facial/health")
+def facial_health(request: Request):
+    get_user(request)
+    data = _facial_get("/api/health")
+    data["url"] = FACIAL_API_URL
+    return data
+
+
+@app.get("/api/facial/status")
+def facial_status(request: Request):
+    get_user(request)
+    data = _facial_get("/api/status")
+    data["url"] = FACIAL_API_URL
+    return data
+
+
+@app.post("/api/facial/start")
+def facial_start(request: Request, config: dict | None = Body(default=None)):
+    get_user(request)
+    data = _facial_post("/api/start", config)
+    data["url"] = FACIAL_API_URL
+    return data
+
+
+@app.post("/api/facial/stop")
+def facial_stop(request: Request):
+    get_user(request)
+    data = _facial_post("/api/stop")
+    data["url"] = FACIAL_API_URL
+    return data
 
 
 # ─── live monitoring (only show truly active sessions) ───────────────────
